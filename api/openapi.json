@@ -1,0 +1,1023 @@
+{
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "Snapshot": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SnapshotItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "lookback_min": {
+            "title": "Lookback Min",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "at",
+          "lookback_min",
+          "truncated",
+          "items"
+        ],
+        "title": "Snapshot",
+        "type": "object"
+      },
+      "SnapshotItem": {
+        "properties": {
+          "cog": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cog"
+          },
+          "heading": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading"
+          },
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "title": "Lon",
+            "type": "number"
+          },
+          "mmsi": {
+            "title": "Mmsi",
+            "type": "integer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "ship_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ship Type"
+          },
+          "sog": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sog"
+          },
+          "ts": {
+            "format": "date-time",
+            "title": "Ts",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mmsi",
+          "ts",
+          "lat",
+          "lon",
+          "sog",
+          "cog",
+          "heading",
+          "name",
+          "ship_type"
+        ],
+        "title": "SnapshotItem",
+        "type": "object"
+      },
+      "Stop": {
+        "properties": {
+          "duration_s": {
+            "title": "Duration S",
+            "type": "number"
+          },
+          "end_ts": {
+            "format": "date-time",
+            "title": "End Ts",
+            "type": "string"
+          },
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "title": "Lon",
+            "type": "number"
+          },
+          "mmsi": {
+            "title": "Mmsi",
+            "type": "integer"
+          },
+          "start_ts": {
+            "format": "date-time",
+            "title": "Start Ts",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mmsi",
+          "start_ts",
+          "end_ts",
+          "lat",
+          "lon",
+          "duration_s"
+        ],
+        "title": "Stop",
+        "type": "object"
+      },
+      "Track": {
+        "properties": {
+          "downsampled": {
+            "title": "Downsampled",
+            "type": "boolean"
+          },
+          "end": {
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "mmsi": {
+            "title": "Mmsi",
+            "type": "integer"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/TrackPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "total_points": {
+            "title": "Total Points",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mmsi",
+          "start",
+          "end",
+          "total_points",
+          "downsampled",
+          "points"
+        ],
+        "title": "Track",
+        "type": "object"
+      },
+      "TrackPoint": {
+        "properties": {
+          "cog": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cog"
+          },
+          "heading": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading"
+          },
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "title": "Lon",
+            "type": "number"
+          },
+          "sog": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sog"
+          },
+          "ts": {
+            "format": "date-time",
+            "title": "Ts",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ts",
+          "lat",
+          "lon",
+          "sog",
+          "cog",
+          "heading"
+        ],
+        "title": "TrackPoint",
+        "type": "object"
+      },
+      "Trip": {
+        "properties": {
+          "distance_m": {
+            "title": "Distance M",
+            "type": "number"
+          },
+          "duration_s": {
+            "title": "Duration S",
+            "type": "number"
+          },
+          "end_lat": {
+            "title": "End Lat",
+            "type": "number"
+          },
+          "end_lon": {
+            "title": "End Lon",
+            "type": "number"
+          },
+          "end_ts": {
+            "format": "date-time",
+            "title": "End Ts",
+            "type": "string"
+          },
+          "mmsi": {
+            "title": "Mmsi",
+            "type": "integer"
+          },
+          "point_count": {
+            "title": "Point Count",
+            "type": "integer"
+          },
+          "start_lat": {
+            "title": "Start Lat",
+            "type": "number"
+          },
+          "start_lon": {
+            "title": "Start Lon",
+            "type": "number"
+          },
+          "start_ts": {
+            "format": "date-time",
+            "title": "Start Ts",
+            "type": "string"
+          },
+          "trip_id": {
+            "title": "Trip Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trip_id",
+          "mmsi",
+          "start_ts",
+          "end_ts",
+          "start_lat",
+          "start_lon",
+          "end_lat",
+          "end_lon",
+          "duration_s",
+          "distance_m",
+          "point_count"
+        ],
+        "title": "Trip",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "Vessel": {
+        "properties": {
+          "callsign": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Callsign"
+          },
+          "cargo_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cargo Type"
+          },
+          "destination": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination"
+          },
+          "draught": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draught"
+          },
+          "eta": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta"
+          },
+          "first_seen": {
+            "format": "date-time",
+            "title": "First Seen",
+            "type": "string"
+          },
+          "imo": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imo"
+          },
+          "last_seen": {
+            "format": "date-time",
+            "title": "Last Seen",
+            "type": "string"
+          },
+          "length": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length"
+          },
+          "mmsi": {
+            "title": "Mmsi",
+            "type": "integer"
+          },
+          "mobile_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mobile Type"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "ship_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ship Type"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "mmsi",
+          "name",
+          "imo",
+          "callsign",
+          "ship_type",
+          "cargo_type",
+          "mobile_type",
+          "length",
+          "width",
+          "draught",
+          "destination",
+          "eta",
+          "first_seen",
+          "last_seen"
+        ],
+        "title": "Vessel",
+        "type": "object"
+      },
+      "VesselSummary": {
+        "properties": {
+          "callsign": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Callsign"
+          },
+          "mmsi": {
+            "title": "Mmsi",
+            "type": "integer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "ship_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ship Type"
+          }
+        },
+        "required": [
+          "mmsi",
+          "name",
+          "callsign",
+          "ship_type"
+        ],
+        "title": "VesselSummary",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Vessel positions, tracks and snapshots from AIS data. All timestamps are UTC; naive timestamps are interpreted as UTC.",
+    "title": "AIS API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/snapshot": {
+      "get": {
+        "operationId": "snapshot_snapshot_get",
+        "parameters": [
+          {
+            "description": "Snapshot time (UTC)",
+            "in": "query",
+            "name": "at",
+            "required": true,
+            "schema": {
+              "description": "Snapshot time (UTC)",
+              "format": "date-time",
+              "title": "At",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Include vessels seen this recently",
+            "in": "query",
+            "name": "lookback_min",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Include vessels seen this recently",
+              "maximum": 60,
+              "minimum": 1,
+              "title": "Lookback Min",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "min_lon,min_lat,max_lon,max_lat (WGS84), e.g. 7.5,54.5,15.5,58",
+            "in": "query",
+            "name": "bbox",
+            "required": true,
+            "schema": {
+              "description": "min_lon,min_lat,max_lon,max_lat (WGS84), e.g. 7.5,54.5,15.5,58",
+              "title": "Bbox",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Snapshot",
+        "tags": [
+          "map"
+        ]
+      }
+    },
+    "/stops": {
+      "get": {
+        "operationId": "stops_stops_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "Start",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "End",
+              "type": "string"
+            }
+          },
+          {
+            "description": "min_lon,min_lat,max_lon,max_lat (WGS84), e.g. 7.5,54.5,15.5,58",
+            "in": "query",
+            "name": "bbox",
+            "required": true,
+            "schema": {
+              "description": "min_lon,min_lat,max_lon,max_lat (WGS84), e.g. 7.5,54.5,15.5,58",
+              "title": "Bbox",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Stop"
+                  },
+                  "title": "Response Stops Stops Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "description": "Not implemented yet (Phase 2)"
+          }
+        },
+        "summary": "Stops",
+        "tags": [
+          "trajectories"
+        ]
+      }
+    },
+    "/trips": {
+      "get": {
+        "operationId": "trips_trips_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "mmsi",
+            "required": true,
+            "schema": {
+              "title": "Mmsi",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "Start",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "End",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Trip"
+                  },
+                  "title": "Response Trips Trips Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "description": "Not implemented yet (Phase 2)"
+          }
+        },
+        "summary": "Trips",
+        "tags": [
+          "trajectories"
+        ]
+      }
+    },
+    "/vessels": {
+      "get": {
+        "operationId": "search_vessels_vessels_get",
+        "parameters": [
+          {
+            "description": "MMSI prefix, name or callsign",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "MMSI prefix, name or callsign",
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/VesselSummary"
+                  },
+                  "title": "Response Search Vessels Vessels Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Vessels",
+        "tags": [
+          "vessels"
+        ]
+      }
+    },
+    "/vessels/{mmsi}": {
+      "get": {
+        "operationId": "vessel_vessels__mmsi__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mmsi",
+            "required": true,
+            "schema": {
+              "maximum": 799999999,
+              "minimum": 200000000,
+              "title": "Mmsi",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vessel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Unknown MMSI"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Vessel",
+        "tags": [
+          "vessels"
+        ]
+      }
+    },
+    "/vessels/{mmsi}/track": {
+      "get": {
+        "operationId": "track_vessels__mmsi__track_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mmsi",
+            "required": true,
+            "schema": {
+              "maximum": 799999999,
+              "minimum": 200000000,
+              "title": "Mmsi",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "Start",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "End",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_points",
+            "required": false,
+            "schema": {
+              "default": 2000,
+              "maximum": 5000,
+              "minimum": 2,
+              "title": "Max Points",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Track"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "description": "Window invalid or longer than 24 h"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Track",
+        "tags": [
+          "vessels"
+        ]
+      }
+    }
+  }
+}
