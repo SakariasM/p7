@@ -18,6 +18,7 @@ ais = "ais.cli:app"
 [dependency-groups]
 dev = [
     "httpx2>=2.13.1",
+    "matplotlib>=3.11.2",
     "pyright>=1.1.390",
     "pytest>=8.3",
     "ruff>=0.8",

@@ -4,28 +4,46 @@ Timestamps are naive UTC throughout. Every query filters on the `date` partition
 so DuckDB only opens the days it needs.
 """
 
+import json
 import math
 from datetime import datetime, timedelta
 from typing import Any
 
 import duckdb
 
+from ais.derive import DERIVED_TABLES
 from ais.models import (
     BBox,
+    LineString,
     Snapshot,
     SnapshotItem,
     Stop,
+    Stops,
     Track,
     TrackPoint,
     Trip,
+    TripGeometry,
     Vessel,
     VesselSummary,
 )
 from ais.paths import DataPaths
+from ais.store.base import DerivedDataMissing
+
+
+def has_derived(paths: DataPaths) -> bool:
+    return all(any((paths.derived / t).glob("*.parquet")) for t in DERIVED_TABLES)
 
 
 def create_views(con: duckdb.DuckDBPyConnection, paths: DataPaths) -> None:
-    """Define `positions`, `vessels_daily`, `vessels` and `quality` views over clean/."""
+    """Define `positions`, `vessels_daily`, `vessels` and `quality` views over clean/, and
+    `trips`, `stops`, `trip_geometry`, `derive_quality` over derived/ when it exists."""
+    if has_derived(paths):
+        for table in DERIVED_TABLES:
+            name = "derive_quality" if table == "quality" else table
+            con.execute(
+                f"CREATE OR REPLACE VIEW {name} AS"
+                f" SELECT * FROM '{paths.derived / table / '*.parquet'}'"
+            )
     for table in ("positions", "quality"):
         con.execute(
             f"CREATE OR REPLACE VIEW {table} AS SELECT * FROM read_parquet("
@@ -70,6 +88,7 @@ class DuckDBStore:
                 f"No cleaned data under {paths.clean}. Run `uv run ais dev` first."
             )
         self._con = duckdb.connect()
+        self._has_derived = has_derived(paths)
         create_views(self._con, paths)
 
     def _cursor(self) -> duckdb.DuckDBPyConnection:
@@ -158,8 +177,61 @@ class DuckDBStore:
             items=[SnapshotItem.model_validate(r) for r in rows[:max_items]],
         )
 
-    def trips(self, mmsi: int, start: datetime, end: datetime) -> list[Trip]:
-        raise NotImplementedError("trips are produced in Phase 2 (trajectories)")
+    def _require_derived(self) -> None:
+        if not self._has_derived:
+            raise DerivedDataMissing("trips and stops are not built; run `uv run ais derive`")
 
-    def stops(self, bbox: BBox, start: datetime, end: datetime) -> list[Stop]:
-        raise NotImplementedError("stops are produced in Phase 2 (trajectories)")
+    def trips(self, mmsi: int, start: datetime, end: datetime) -> list[Trip]:
+        self._require_derived()
+        rows = _rows(
+            self._cursor(),
+            "SELECT * FROM trips WHERE mmsi = ? AND start_ts <= ? AND end_ts >= ?"
+            " ORDER BY start_ts",
+            [mmsi, end, start],
+        )
+        return [Trip.model_validate(r) for r in rows]
+
+    def trip_geometry(self, trip_id: str) -> TripGeometry | None:
+        self._require_derived()
+        rows = _rows(self._cursor(), "SELECT * FROM trip_geometry WHERE trip_id = ?", [trip_id])
+        if not rows:
+            return None
+        geom = json.loads(rows[0]["geojson"])
+        # Simplifying a line whose points coincide can collapse it to a Point.
+        coords = geom["coordinates"] if geom["type"] == "LineString" else [geom["coordinates"]] * 2
+        return TripGeometry(
+            trip_id=trip_id,
+            mmsi=rows[0]["mmsi"],
+            geometry=LineString(coordinates=[(c[0], c[1]) for c in coords]),
+        )
+
+    def stops(
+        self, bbox: BBox, start: datetime, end: datetime, mmsi: int | None, max_items: int
+    ) -> Stops:
+        self._require_derived()
+        rows = _rows(
+            self._cursor(),
+            """
+            SELECT * FROM stops
+            WHERE start_ts <= ? AND end_ts >= ?
+              AND lon BETWEEN ? AND ? AND lat BETWEEN ? AND ?
+              AND (? IS NULL OR mmsi = ?)
+            ORDER BY start_ts, mmsi
+            LIMIT ?
+            """,
+            [
+                end,
+                start,
+                bbox.min_lon,
+                bbox.max_lon,
+                bbox.min_lat,
+                bbox.max_lat,
+                mmsi,
+                mmsi,
+                max_items + 1,
+            ],
+        )
+        return Stops(
+            truncated=len(rows) > max_items,
+            items=[Stop.model_validate(r) for r in rows[:max_items]],
+        )

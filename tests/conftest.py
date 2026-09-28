@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from ais.clean import StepResult, clean_day
+from ais.derive import DeriveResult, derive
 from ais.paths import DataPaths
 from ais.store.duckdb_store import DuckDBStore
 
@@ -33,6 +34,21 @@ def cleaned(paths: DataPaths, tmp_path: Path) -> dict[date, list[StepResult]]:
 
 @pytest.fixture
 def store(paths: DataPaths, cleaned: dict[date, list[StepResult]]) -> Iterator[DuckDBStore]:
+    s = DuckDBStore(paths)
+    yield s
+    s.close()
+
+
+@pytest.fixture
+def derived(paths: DataPaths) -> DeriveResult:
+    from .test_derive import scenario, write_clean
+
+    write_clean(paths, scenario())
+    return derive(paths)
+
+
+@pytest.fixture
+def dstore(paths: DataPaths, derived: DeriveResult) -> Iterator[DuckDBStore]:
     s = DuckDBStore(paths)
     yield s
     s.close()

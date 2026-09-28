@@ -17,6 +17,12 @@ def client(store: DuckDBStore) -> Iterator[TestClient]:
         yield c
 
 
+@pytest.fixture
+def derived_client(dstore: DuckDBStore) -> Iterator[TestClient]:
+    with TestClient(create_app(dstore)) as c:
+        yield c
+
+
 def test_vessel_and_404(client: TestClient) -> None:
     assert client.get(f"/vessels/{A}").json()["name"] == "ALPHA"
     assert client.get("/vessels/219999999").status_code == 404
@@ -78,10 +84,30 @@ def test_snapshot_limits(client: TestClient, params: dict[str, str | int]) -> No
     assert client.get("/snapshot", params=params).status_code == 422
 
 
-def test_trips_and_stops_are_501(client: TestClient) -> None:
+def test_trips_and_stops_503_until_derived(client: TestClient) -> None:
     window = {"start": "2026-09-24T00:00:00", "end": "2026-09-24T01:00:00"}
-    assert client.get("/trips", params={"mmsi": A, **window}).status_code == 501
-    assert client.get("/stops", params={"bbox": BBOX, **window}).status_code == 501
+    r = client.get("/trips", params={"mmsi": A, **window})
+    assert r.status_code == 503 and "ais derive" in r.json()["detail"]
+    assert client.get("/stops", params={"bbox": BBOX, **window}).status_code == 503
+    assert client.get("/trips/x/geometry").status_code == 503
+
+
+def test_trips_window_limit(client: TestClient) -> None:
+    params = {"mmsi": A, "start": "2026-08-01T00:00:00", "end": "2026-09-24T00:00:00"}
+    assert client.get("/trips", params=params).status_code == 400
+
+
+def test_derived_endpoints(derived_client: TestClient) -> None:
+    window = {"start": "2026-09-24T00:00:00", "end": "2026-09-25T00:00:00"}
+    trips = derived_client.get("/trips", params={"mmsi": 219000011, **window}).json()
+    assert [t["point_count"] for t in trips] == [20, 20]
+    g = derived_client.get(f"/trips/{trips[0]['trip_id']}/geometry").json()
+    assert g["geometry"]["type"] == "LineString" and len(g["geometry"]["coordinates"]) == 2
+    assert derived_client.get("/trips/nope/geometry").status_code == 404
+    stops = derived_client.get(
+        "/stops", params={"bbox": "7.9,54.9,8.1,55.3", "mmsi": 219000011, **window}
+    ).json()
+    assert [s["point_count"] for s in stops["items"]] == [15]
 
 
 def test_openapi_contract_is_committed_and_current() -> None:

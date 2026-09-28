@@ -1,14 +1,14 @@
 """HTTP API over an AisStore. All limits are enforced here, server-side."""
 
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from ais.models import BBox, Snapshot, Stop, Track, Trip, Vessel, VesselSummary
-from ais.store.base import AisStore
+from ais.models import BBox, Snapshot, Stops, Track, Trip, TripGeometry, Vessel, VesselSummary
+from ais.store.base import AisStore, DerivedDataMissing
 
 MAX_SEARCH_RESULTS = 100
 MAX_TRACK_WINDOW = timedelta(hours=24)
@@ -18,9 +18,11 @@ MAX_LOOKBACK_MIN = 60
 DEFAULT_LOOKBACK_MIN = 10
 MAX_SNAPSHOT_ITEMS = 5000
 MAX_TRIPS_WINDOW = timedelta(days=31)
+MAX_STOPS_ITEMS = 5000
 
 BBOX_DOC = "min_lon,min_lat,max_lon,max_lat (WGS84), e.g. 7.5,54.5,15.5,58"
 MMSI = Annotated[int, Path(ge=200_000_000, le=799_999_999)]
+MMSIQuery = Annotated[int, Query(ge=200_000_000, le=799_999_999)]
 
 
 def to_utc_naive(dt: datetime) -> datetime:
@@ -66,6 +68,10 @@ def create_app(store: AisStore | None) -> FastAPI:
         "All timestamps are UTC; naive timestamps are interpreted as UTC.",
     )
     app.state.store = store
+
+    @app.exception_handler(DerivedDataMissing)
+    def _derived_missing(_: Request, e: DerivedDataMissing) -> JSONResponse:
+        return JSONResponse({"detail": str(e)}, status_code=503)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -123,34 +129,50 @@ def create_app(store: AisStore | None) -> FastAPI:
             bbox, to_utc_naive(at), timedelta(minutes=lookback_min), MAX_SNAPSHOT_ITEMS
         )
 
+    derived_503 = {503: {"description": "Trips/stops not built yet (`uv run ais derive`)"}}
+
     @app.get(
         "/trips",
         response_model=list[Trip],
         tags=["trajectories"],
-        responses={501: {"description": "Not implemented yet (Phase 2)"}},
+        responses={400: {"description": "Window invalid or longer than 31 days"}, **derived_503},
     )
-    def trips(s: StoreDep, mmsi: int, start: datetime, end: datetime) -> list[Trip]:
+    def trips(s: StoreDep, mmsi: MMSIQuery, start: datetime, end: datetime) -> list[Trip]:
+        """Trips of one vessel that overlap the window."""
         start, end = check_window(start, end, MAX_TRIPS_WINDOW)
-        return _not_implemented(lambda: s.trips(mmsi, start, end))
+        return s.trips(mmsi, start, end)
+
+    @app.get(
+        "/trips/{trip_id}/geometry",
+        response_model=TripGeometry,
+        tags=["trajectories"],
+        responses={404: {"description": "Unknown trip"}, **derived_503},
+    )
+    def trip_geometry(s: StoreDep, trip_id: Annotated[str, Path(max_length=64)]) -> TripGeometry:
+        """Simplified trip line as GeoJSON, for drawing on a map."""
+        g = s.trip_geometry(trip_id)
+        if g is None:
+            raise HTTPException(404, f"trip {trip_id} not found")
+        return g
 
     @app.get(
         "/stops",
-        response_model=list[Stop],
+        response_model=Stops,
         tags=["trajectories"],
-        responses={501: {"description": "Not implemented yet (Phase 2)"}},
+        responses={400: {"description": "Window invalid or longer than 31 days"}, **derived_503},
     )
-    def stops(s: StoreDep, bbox: BBoxDep, start: datetime, end: datetime) -> list[Stop]:
+    def stops(
+        s: StoreDep,
+        bbox: BBoxDep,
+        start: datetime,
+        end: datetime,
+        mmsi: Annotated[int | None, Query(ge=200_000_000, le=799_999_999)] = None,
+    ) -> Stops:
+        """Stops located in the bbox that overlap the window (ports, anchorages)."""
         start, end = check_window(start, end, MAX_TRIPS_WINDOW)
-        return _not_implemented(lambda: s.stops(bbox, start, end))
+        return s.stops(bbox, start, end, mmsi, MAX_STOPS_ITEMS)
 
     return app
-
-
-def _not_implemented[T](f: Callable[[], T]) -> T:
-    try:
-        return f()
-    except NotImplementedError as e:
-        raise HTTPException(501, str(e)) from e
 
 
 def app_from_env() -> FastAPI:

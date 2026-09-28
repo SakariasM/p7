@@ -8,7 +8,7 @@ raw/aisdk-YYYY-MM-DD.zip                  downloaded dump (deleted after cleanin
 clean/positions/date=YYYY-MM-DD/*.parquet ts, mmsi, lat, lon, sog, cog, heading, rot, nav_status
 clean/vessels/date=YYYY-MM-DD/*.parquet   latest static info per MMSI that day
 clean/quality/date=YYYY-MM-DD/*.parquet   rows affected by each cleaning step
-derived/                                  trips, stops (Phase 2)
+derived/{trips,stops,trip_geometry,quality}/part.parquet   rebuilt from all of clean/ by `ais derive`
 ais.duckdb                                views over clean/; open from the repo root
 ```
 
@@ -33,9 +33,27 @@ Text sentinels (`Unknown`, `Undefined`, `Unknown value`, empty) are NULL from th
 2026-09-24: 17,612,827 raw rows -> 10,394,187 positions for 4,230 vessels.
 Most removed rows (5.7M) are exact duplicates.
 
+## Trips and stops
+
+`uv run ais derive` rebuilds derived/ from every cleaned day at once (trips cross midnight).
+Thresholds are constants at the top of `src/ais/derive.py`.
+
+1. Bad fixes removed: outside DMA coverage (lat 50-64, lon -5..32), farther from the
+   rolling median of +-10 neighbours than 50 kn allows, and single-point spikes.
+2. Stop: stationary (SOG < 0.5 kn) for >= 10 min with no gap over 30 min.
+3. Trip: movement between stops, split at gaps over 30 min and at impossible jumps
+   (> 50 kn over > 500 m). Needs >= 10 points and >= 1 km.
+4. Geometry: trip line simplified at ~20 m tolerance (DuckDB spatial), as GeoJSON.
+
+Dev slice: 33.0M positions -> 16,526 trips (median 86 min, 16 km) and 32,079 stops.
+Removed 46 points outside coverage, 315 outliers, 469 spikes; 1,241 jump splits.
+Known limit: a long run of corrupt fixes (e.g. 45 min with a dropped longitude digit)
+becomes its own short trip at the wrong place rather than being removed.
+
 ## Ad-hoc queries
 
 ```sh
 duckdb data/ais.duckdb -c "select * from vessels order by last_seen desc limit 10"
 duckdb data/ais.duckdb -c "select * from quality order by date, step_order"
+duckdb data/ais.duckdb -c "select * from trips order by distance_m desc limit 10"
 ```

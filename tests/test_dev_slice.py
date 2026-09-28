@@ -60,3 +60,13 @@ def test_every_position_has_a_vessel_row() -> None:
     """)
         == 0
     )
+
+
+@pytest.mark.skipif(not (paths.derived / "trips").exists(), reason="no derived data")
+def test_derived_trips_are_plausible() -> None:
+    trips = f"'{paths.derived}/trips/*.parquet'"
+    # Average speed over a whole trip: fast ferries reach ~40 kn; nothing should near 60.
+    assert _one(f"SELECT count(*) FROM {trips} WHERE distance_m / duration_s * 1.9438 > 60") == 0
+    assert _one(f"SELECT count(*) FROM {trips} WHERE point_count < 10 OR distance_m < 1000") == 0
+    geoms = f"'{paths.derived}/trip_geometry/*.parquet'"
+    assert _one(f"SELECT count(*) FROM {trips} ANTI JOIN {geoms} USING (trip_id)") == 0

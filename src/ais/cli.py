@@ -9,6 +9,7 @@ import duckdb
 import typer
 
 from ais.clean import clean_day
+from ais.derive import derive as derive_all
 from ais.ingest import fetch as fetch_zip
 from ais.paths import CLEAN_TABLES, DataPaths
 
@@ -49,7 +50,9 @@ def clean(
     day: Day,
     keep_raw: Annotated[bool, typer.Option(help="Keep the 600 MB raw zip afterwards")] = False,
 ) -> None:
-    """Fetch (if needed) and clean one day. Re-running replaces only that day."""
+    """Fetch (if needed) and clean one day. Re-running replaces only that day.
+
+    Run `ais derive` afterwards to rebuild trips and stops."""
     _process(_paths(), day.date(), keep_raw)
     build_duckdb()
 
@@ -59,13 +62,25 @@ def dev(
     force: Annotated[bool, typer.Option(help="Re-clean days that already exist")] = False,
     keep_raw: bool = False,
 ) -> None:
-    """Reproduce the dev slice (2026-09-22..24) and build data/ais.duckdb."""
+    """Reproduce the dev slice (2026-09-22..24): clean, derive, build data/ais.duckdb."""
     paths = _paths()
     for day in DEV_DAYS:
         if _is_clean(paths, day) and not force:
             typer.echo(f"{day}: already clean")
             continue
         _process(paths, day, keep_raw)
+    derive()
+
+
+@app.command()
+def derive() -> None:
+    """Rebuild trips, stops and trip geometry (data/derived/) from all cleaned days."""
+    r = derive_all(_paths())
+    typer.echo(
+        f"{r.positions:,} positions -> {r.trips:,} trips, {r.stops:,} stops"
+        f" (removed {r.outside_coverage} outside coverage, {r.outliers_removed} outliers,"
+        f" {r.spikes_removed} spikes; {r.jump_splits} splits at impossible jumps)"
+    )
     build_duckdb()
 
 
@@ -78,7 +93,7 @@ def build_duckdb() -> None:
     paths.duckdb_file.unlink(missing_ok=True)
     with duckdb.connect(str(paths.duckdb_file)) as con:
         create_views(con, paths)
-    typer.echo(f"wrote {paths.duckdb_file} (views: positions, vessels, vessels_daily, quality)")
+    typer.echo(f"wrote {paths.duckdb_file}")
 
 
 @app.command()

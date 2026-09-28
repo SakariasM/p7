@@ -14,6 +14,39 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "LineString": {
+        "description": "GeoJSON LineString; coordinates are [lon, lat] pairs.",
+        "properties": {
+          "coordinates": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Coordinates",
+            "type": "array"
+          },
+          "type": {
+            "const": "LineString",
+            "default": "LineString",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "coordinates"
+        ],
+        "title": "LineString",
+        "type": "object"
+      },
       "Snapshot": {
         "properties": {
           "at": {
@@ -158,6 +191,10 @@
             "title": "Mmsi",
             "type": "integer"
           },
+          "point_count": {
+            "title": "Point Count",
+            "type": "integer"
+          },
           "start_ts": {
             "format": "date-time",
             "title": "Start Ts",
@@ -170,9 +207,31 @@
           "end_ts",
           "lat",
           "lon",
-          "duration_s"
+          "duration_s",
+          "point_count"
         ],
         "title": "Stop",
+        "type": "object"
+      },
+      "Stops": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Stop"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "truncated",
+          "items"
+        ],
+        "title": "Stops",
         "type": "object"
       },
       "Track": {
@@ -341,6 +400,28 @@
           "point_count"
         ],
         "title": "Trip",
+        "type": "object"
+      },
+      "TripGeometry": {
+        "properties": {
+          "geometry": {
+            "$ref": "#/components/schemas/LineString"
+          },
+          "mmsi": {
+            "title": "Mmsi",
+            "type": "integer"
+          },
+          "trip_id": {
+            "title": "Trip Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trip_id",
+          "mmsi",
+          "geometry"
+        ],
+        "title": "TripGeometry",
         "type": "object"
       },
       "ValidationError": {
@@ -693,6 +774,7 @@
     },
     "/stops": {
       "get": {
+        "description": "Stops located in the bbox that overlap the window (ports, anchorages).",
         "operationId": "stops_stops_get",
         "parameters": [
           {
@@ -716,6 +798,24 @@
             }
           },
           {
+            "in": "query",
+            "name": "mmsi",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 799999999,
+                  "minimum": 200000000,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mmsi"
+            }
+          },
+          {
             "description": "min_lon,min_lat,max_lon,max_lat (WGS84), e.g. 7.5,54.5,15.5,58",
             "in": "query",
             "name": "bbox",
@@ -732,15 +832,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/Stop"
-                  },
-                  "title": "Response Stops Stops Get",
-                  "type": "array"
+                  "$ref": "#/components/schemas/Stops"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "description": "Window invalid or longer than 31 days"
           },
           "422": {
             "content": {
@@ -752,8 +851,8 @@
             },
             "description": "Validation Error"
           },
-          "501": {
-            "description": "Not implemented yet (Phase 2)"
+          "503": {
+            "description": "Trips/stops not built yet (`uv run ais derive`)"
           }
         },
         "summary": "Stops",
@@ -764,6 +863,7 @@
     },
     "/trips": {
       "get": {
+        "description": "Trips of one vessel that overlap the window.",
         "operationId": "trips_trips_get",
         "parameters": [
           {
@@ -771,6 +871,8 @@
             "name": "mmsi",
             "required": true,
             "schema": {
+              "maximum": 799999999,
+              "minimum": 200000000,
               "title": "Mmsi",
               "type": "integer"
             }
@@ -811,6 +913,9 @@
             },
             "description": "Successful Response"
           },
+          "400": {
+            "description": "Window invalid or longer than 31 days"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -821,11 +926,61 @@
             },
             "description": "Validation Error"
           },
-          "501": {
-            "description": "Not implemented yet (Phase 2)"
+          "503": {
+            "description": "Trips/stops not built yet (`uv run ais derive`)"
           }
         },
         "summary": "Trips",
+        "tags": [
+          "trajectories"
+        ]
+      }
+    },
+    "/trips/{trip_id}/geometry": {
+      "get": {
+        "description": "Simplified trip line as GeoJSON, for drawing on a map.",
+        "operationId": "trip_geometry_trips__trip_id__geometry_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trip_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "title": "Trip Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TripGeometry"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Unknown trip"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Trips/stops not built yet (`uv run ais derive`)"
+          }
+        },
+        "summary": "Trip Geometry",
         "tags": [
           "trajectories"
         ]

@@ -4,7 +4,11 @@ implementation is a drop-in replacement verified by the same contract tests."""
 from datetime import datetime, timedelta
 from typing import Protocol
 
-from ais.models import BBox, Snapshot, Stop, Track, Trip, Vessel, VesselSummary
+from ais.models import BBox, Snapshot, Stops, Track, Trip, TripGeometry, Vessel, VesselSummary
+
+
+class DerivedDataMissing(RuntimeError):
+    """Trips/stops have not been built yet (`uv run ais derive`)."""
 
 
 class AisStore(Protocol):
@@ -18,6 +22,14 @@ class AisStore(Protocol):
         self, bbox: BBox, at: datetime, lookback: timedelta, max_items: int
     ) -> Snapshot: ...
 
-    def trips(self, mmsi: int, start: datetime, end: datetime) -> list[Trip]: ...
+    def trips(self, mmsi: int, start: datetime, end: datetime) -> list[Trip]:
+        """Trips of one vessel overlapping [start, end], ordered by start."""
+        ...
 
-    def stops(self, bbox: BBox, start: datetime, end: datetime) -> list[Stop]: ...
+    def trip_geometry(self, trip_id: str) -> TripGeometry | None: ...
+
+    def stops(
+        self, bbox: BBox, start: datetime, end: datetime, mmsi: int | None, max_items: int
+    ) -> Stops:
+        """Stops located in bbox overlapping [start, end], ordered by start."""
+        ...

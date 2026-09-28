@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from ais.models import BBox
-from ais.store.base import AisStore
+from ais.store.base import AisStore, DerivedDataMissing
 
 A, B = 219000001, 219000002
 DAY_START = datetime(2026, 9, 24)
@@ -63,8 +63,11 @@ def test_snapshot_bbox_limit_and_truncation(store: AisStore) -> None:
     assert store.snapshot(DK, DAY_START - timedelta(hours=2), lb, 100).items == []
 
 
-def test_trips_and_stops_not_implemented_yet(store: AisStore) -> None:
-    with pytest.raises(NotImplementedError):
-        store.trips(A, DAY_START, DAY_START + timedelta(hours=1))
-    with pytest.raises(NotImplementedError):
-        store.stops(DK, DAY_START, DAY_START + timedelta(hours=1))
+def test_trips_and_stops_need_derive(store: AisStore) -> None:
+    window = (DAY_START, DAY_START + timedelta(hours=1))
+    with pytest.raises(DerivedDataMissing):
+        store.trips(A, *window)
+    with pytest.raises(DerivedDataMissing):
+        store.stops(DK, *window, None, 10)
+    with pytest.raises(DerivedDataMissing):
+        store.trip_geometry("x")

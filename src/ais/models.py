@@ -1,7 +1,7 @@
 """Typed records shared by the store and the API (and the OpenAPI contract)."""
 
 from datetime import datetime
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -106,6 +106,19 @@ class Trip(BaseModel):
     point_count: int
 
 
+class LineString(BaseModel):
+    """GeoJSON LineString; coordinates are [lon, lat] pairs."""
+
+    type: Literal["LineString"] = "LineString"
+    coordinates: list[tuple[float, float]]
+
+
+class TripGeometry(BaseModel):
+    trip_id: str
+    mmsi: int
+    geometry: LineString
+
+
 class Stop(BaseModel):
     mmsi: int
     start_ts: datetime
@@ -113,3 +126,9 @@ class Stop(BaseModel):
     lat: float
     lon: float
     duration_s: float
+    point_count: int
+
+
+class Stops(BaseModel):
+    truncated: bool
+    items: list[Stop]
