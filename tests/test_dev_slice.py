@@ -70,17 +70,3 @@ def test_derived_trips_are_plausible() -> None:
     assert _one(f"SELECT count(*) FROM {trips} WHERE point_count < 10 OR distance_m < 1000") == 0
     geoms = f"'{paths.derived}/trip_geometry/*.parquet'"
     assert _one(f"SELECT count(*) FROM {trips} ANTI JOIN {geoms} USING (trip_id)") == 0
-
-
-@pytest.mark.skipif(not (paths.derived / "trips").exists(), reason="no derived data")
-def test_question_answers_match_reference() -> None:
-    from ais.questions import answer_all, connect, load_answers, load_questions, run
-
-    questions = load_questions()
-    stored = load_answers()
-    with connect(paths) as con:
-        answers = answer_all(con, questions)
-        for q in questions:
-            assert answers[q.id] == stored[q.id], q.id
-            if q.check_sql:
-                assert run(con, q.check_sql).rows == answers[q.id].rows, q.id

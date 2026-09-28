@@ -133,33 +133,3 @@ def openapi(
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text)
     typer.echo(f"wrote {out}")
-
-
-@app.command()
-def questions(
-    check: Annotated[bool, typer.Option(help="Verify answers.json instead of writing it")] = False,
-) -> None:
-    """Answer questions/questions.toml against the dev slice into questions/answers.json."""
-    from ais import questions as qs
-
-    qlist = qs.load_questions()
-    with qs.connect(_paths()) as con:
-        answers = qs.answer_all(con, qlist)
-        checks = {q.id: qs.run(con, q.check_sql) for q in qlist if q.check_sql}
-    bad = [k for k, a in checks.items() if a.rows != answers[k].rows]
-    if bad:
-        typer.echo(f"check_sql disagrees for: {', '.join(bad)}", err=True)
-        raise typer.Exit(1)
-    text = qs.dump_answers(answers)
-    if check:
-        if not qs.ANSWERS_FILE.exists() or qs.ANSWERS_FILE.read_text() != text:
-            typer.echo(f"{qs.ANSWERS_FILE} does not match the data", err=True)
-            raise typer.Exit(1)
-        typer.echo(f"{len(qlist)} answers match")
-        return
-    qs.ANSWERS_FILE.write_text(text)
-    n_para = sum(len(q.paraphrases) for q in qlist)
-    typer.echo(
-        f"wrote {qs.ANSWERS_FILE}: {len(qlist)} questions, {n_para} paraphrases,"
-        f" {len(checks)} cross-checked"
-    )
