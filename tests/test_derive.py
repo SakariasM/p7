@@ -70,12 +70,13 @@ def write_clean(paths: DataPaths, rows: list[Row]) -> None:
         " NULL::SMALLINT AS heading, NULL::DOUBLE AS rot, NULL::VARCHAR AS nav_status"
         " FROM p ORDER BY mmsi, ts",
         "vessels": VESSELS_SQL.format(
-            src="(SELECT *, 'V' || mmsi AS name, NULL::BIGINT AS imo, NULL AS callsign,"
-            " NULL AS ship_type, NULL AS cargo_type, 'Class A' AS mobile_type,"
+            src="(SELECT *, 'V' || mmsi AS name, NULL::BIGINT AS imo, NULL::VARCHAR AS callsign,"
+            " NULL::VARCHAR AS ship_type, NULL::VARCHAR AS cargo_type, 'Class A' AS mobile_type,"
             " NULL::DOUBLE AS length, NULL::DOUBLE AS width, NULL::DOUBLE AS draught,"
-            " NULL AS destination, NULL::TIMESTAMP AS eta FROM p)"
+            " NULL::VARCHAR AS destination, NULL::TIMESTAMP AS eta FROM p)"
         ),
-        "quality": "SELECT 1 AS step_order",
+        "quality": "SELECT 1 AS step_order, 'exact_duplicate' AS step, 'drop' AS action,"
+        " 10::BIGINT AS rows_in, 2::BIGINT AS rows_affected, '' AS description",
     }.items():
         d = paths.partition(table, DAY)
         d.mkdir(parents=True)

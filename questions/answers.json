@@ -1,0 +1,594 @@
+{
+  "vessels_on_day": {
+    "columns": [
+      "vessels"
+    ],
+    "rows": [
+      [
+        5544
+      ]
+    ]
+  },
+  "vessels_all_days": {
+    "columns": [
+      "vessels"
+    ],
+    "rows": [
+      [
+        3258
+      ]
+    ]
+  },
+  "most_reports_day": {
+    "columns": [
+      "mmsi",
+      "name",
+      "reports"
+    ],
+    "rows": [
+      [
+        273298600,
+        "ARCTICA",
+        36523
+      ]
+    ]
+  },
+  "oresund_noon": {
+    "columns": [
+      "vessels"
+    ],
+    "rows": [
+      [
+        324
+      ]
+    ]
+  },
+  "oresund_busiest_hour": {
+    "columns": [
+      "hour_utc",
+      "vessels"
+    ],
+    "rows": [
+      [
+        16,
+        249
+      ]
+    ]
+  },
+  "position_at_time": {
+    "columns": [
+      "ts",
+      "lat",
+      "lon"
+    ],
+    "rows": [
+      [
+        "2026-09-23T11:59:58",
+        56.03322,
+        12.61825
+      ]
+    ]
+  },
+  "crowded_cell": {
+    "columns": [
+      "lat_min",
+      "lon_min",
+      "vessels"
+    ],
+    "rows": [
+      [
+        55.6,
+        12.6,
+        66
+      ]
+    ]
+  },
+  "fishing_underway": {
+    "columns": [
+      "vessels"
+    ],
+    "rows": [
+      [
+        143
+      ]
+    ]
+  },
+  "cargo_speed_kattegat": {
+    "columns": [
+      "avg_sog_kn"
+    ],
+    "rows": [
+      [
+        10.86
+      ]
+    ]
+  },
+  "near_tycho_brahe": {
+    "columns": [
+      "mmsi",
+      "name",
+      "closest_m"
+    ],
+    "rows": [
+      [
+        219000368,
+        "MERCANDIA IV",
+        53.0
+      ],
+      [
+        219024336,
+        "JEPPE",
+        92.0
+      ],
+      [
+        246594000,
+        "DENBORG",
+        348.0
+      ],
+      [
+        219622000,
+        "HAMLET",
+        495.0
+      ],
+      [
+        219010747,
+        "VICTOR",
+        971.0
+      ]
+    ]
+  },
+  "closest_pair_oresund": {
+    "columns": [
+      "mmsi_a",
+      "mmsi_b",
+      "closest_m"
+    ],
+    "rows": [
+      [
+        219006007,
+        219006387,
+        23.0
+      ]
+    ]
+  },
+  "longest_trip_distance": {
+    "columns": [
+      "trip_id",
+      "name",
+      "km"
+    ],
+    "rows": [
+      [
+        "566341000-20260922T041855",
+        "CS CARE",
+        1315.7
+      ]
+    ]
+  },
+  "longest_cargo_trip_time": {
+    "columns": [
+      "name",
+      "trip_id",
+      "hours"
+    ],
+    "rows": [
+      [
+        "GELMOND 1",
+        "341487000-20260922T063221",
+        65.5
+      ]
+    ]
+  },
+  "avg_passenger_trip": {
+    "columns": [
+      "avg_minutes",
+      "trips"
+    ],
+    "rows": [
+      [
+        95.8,
+        4013
+      ]
+    ]
+  },
+  "trips_by_type": {
+    "columns": [
+      "ship_type",
+      "trips"
+    ],
+    "rows": [
+      [
+        "Passenger",
+        4013
+      ],
+      [
+        "Cargo",
+        2378
+      ],
+      [
+        "Sailing",
+        2078
+      ],
+      [
+        "Pleasure",
+        1592
+      ],
+      [
+        "Fishing",
+        1405
+      ]
+    ]
+  },
+  "trips_from_copenhagen": {
+    "columns": [
+      "trips"
+    ],
+    "rows": [
+      [
+        563
+      ]
+    ]
+  },
+  "helsingor_helsingborg": {
+    "columns": [
+      "dk_to_se",
+      "se_to_dk"
+    ],
+    "rows": [
+      [
+        111,
+        113
+      ]
+    ]
+  },
+  "great_belt_crossings": {
+    "columns": [
+      "trips"
+    ],
+    "rows": [
+      [
+        284
+      ]
+    ]
+  },
+  "passenger_km_day": {
+    "columns": [
+      "km"
+    ],
+    "rows": [
+      [
+        36612.0
+      ]
+    ]
+  },
+  "farthest_total": {
+    "columns": [
+      "mmsi",
+      "name",
+      "km"
+    ],
+    "rows": [
+      [
+        259222000,
+        "COLOR MAGIC",
+        1750.0
+      ]
+    ]
+  },
+  "first_trip": {
+    "columns": [
+      "start_ts",
+      "end_ts"
+    ],
+    "rows": [
+      [
+        "2026-09-22T00:15:52",
+        "2026-09-22T01:06:31"
+      ]
+    ]
+  },
+  "midnight_trips": {
+    "columns": [
+      "trips"
+    ],
+    "rows": [
+      [
+        1113
+      ]
+    ]
+  },
+  "fast_trips": {
+    "columns": [
+      "trips"
+    ],
+    "rows": [
+      [
+        285
+      ]
+    ]
+  },
+  "most_stops": {
+    "columns": [
+      "mmsi",
+      "name",
+      "stops"
+    ],
+    "rows": [
+      [
+        219016759,
+        "FRB10",
+        145
+      ],
+      [
+        219032675,
+        "FRB28",
+        142
+      ],
+      [
+        219000859,
+        "SLEIPNER FUR",
+        131
+      ],
+      [
+        219622000,
+        "HAMLET",
+        121
+      ],
+      [
+        219230000,
+        "TYCHO BRAHE",
+        120
+      ]
+    ]
+  },
+  "longest_stop_aarhus": {
+    "columns": [
+      "mmsi",
+      "name",
+      "hours"
+    ],
+    "rows": [
+      [
+        219021119,
+        "WHITE  SOUND",
+        72.0
+      ]
+    ]
+  },
+  "esbjerg_visitors": {
+    "columns": [
+      "vessels"
+    ],
+    "rows": [
+      [
+        92
+      ]
+    ]
+  },
+  "frederikshavn_and_gothenburg": {
+    "columns": [
+      "mmsi",
+      "name"
+    ],
+    "rows": [
+      [
+        219159000,
+        "FENJA"
+      ],
+      [
+        265012140,
+        "VINGAREN"
+      ],
+      [
+        265177000,
+        "STENA DANICA"
+      ],
+      [
+        265410000,
+        "STENA JUTLANDICA"
+      ],
+      [
+        266212000,
+        "NORDEN"
+      ]
+    ]
+  },
+  "busiest_port": {
+    "columns": [
+      "port",
+      "vessels"
+    ],
+    "rows": [
+      [
+        "Gothenburg",
+        313
+      ],
+      [
+        "Copenhagen",
+        224
+      ],
+      [
+        "Skagen",
+        108
+      ],
+      [
+        "Esbjerg",
+        92
+      ],
+      [
+        "Aarhus",
+        78
+      ],
+      [
+        "Frederikshavn",
+        47
+      ]
+    ]
+  },
+  "hamlet_stopped_hours": {
+    "columns": [
+      "hours"
+    ],
+    "rows": [
+      [
+        8.79
+      ]
+    ]
+  },
+  "median_stop_by_type": {
+    "columns": [
+      "ship_type",
+      "stops",
+      "median_minutes"
+    ],
+    "rows": [
+      [
+        "Pleasure",
+        6402,
+        51.3
+      ],
+      [
+        "Sailing",
+        5755,
+        54.0
+      ],
+      [
+        "Passenger",
+        5062,
+        22.8
+      ],
+      [
+        "Fishing",
+        2234,
+        87.0
+      ],
+      [
+        "Cargo",
+        2204,
+        59.1
+      ]
+    ]
+  },
+  "tanker_destinations": {
+    "columns": [
+      "destination",
+      "tankers"
+    ],
+    "rows": [
+      [
+        "FOR ORDERS",
+        16
+      ],
+      [
+        "SEGOT",
+        11
+      ],
+      [
+        "NLRTM",
+        8
+      ],
+      [
+        "DERSK",
+        6
+      ],
+      [
+        "DK SKA",
+        5
+      ]
+    ]
+  },
+  "mega_ships": {
+    "columns": [
+      "mmsi",
+      "name",
+      "length"
+    ],
+    "rows": [
+      [
+        211151710,
+        "WILHELMSHAVEN EXPRES",
+        400.0
+      ],
+      [
+        218006290,
+        "MANILA EXPRESS",
+        400.0
+      ],
+      [
+        440350000,
+        "HMM GDANSK",
+        400.0
+      ],
+      [
+        440363000,
+        "HMM SOUTHAMPTON",
+        400.0
+      ],
+      [
+        477100400,
+        "OOCL JAPAN",
+        400.0
+      ],
+      [
+        477166500,
+        "COSCO SHIPPING VIRGO",
+        400.0
+      ],
+      [
+        477712400,
+        "CSCL GLOBE",
+        400.0
+      ],
+      [
+        563262500,
+        "CMACGM SAINT GERMAIN",
+        400.0
+      ],
+      [
+        636026627,
+        "EVER GIVEN",
+        400.0
+      ],
+      [
+        215199000,
+        "CMA CGM ZHENG HE",
+        399.0
+      ],
+      [
+        219019139,
+        "MARSTAL MAERSK",
+        399.0
+      ],
+      [
+        219864000,
+        "MOSCOW MAERSK",
+        399.0
+      ],
+      [
+        477886300,
+        "OOCL PIRAEUS",
+        399.0
+      ],
+      [
+        563254800,
+        "EMMA MAERSK",
+        399.0
+      ],
+      [
+        563254400,
+        "EDITH MAERSK",
+        398.0
+      ]
+    ]
+  },
+  "duplicate_share": {
+    "columns": [
+      "pct"
+    ],
+    "rows": [
+      [
+        45.98
+      ]
+    ]
+  }
+}

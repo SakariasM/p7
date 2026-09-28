@@ -37,6 +37,19 @@ npx openapi-typescript api/openapi.json -o src/api-types.ts
 Timestamps are UTC. Out-of-range parameters return 422; invalid time windows return 400.
 Trip and stop endpoints return 503 until `uv run ais derive` has run.
 
+## Question set
+
+`questions/questions.toml` has 33 realistic user questions (21 extra paraphrases), each
+with reference SQL and tags (spatial range, time window, per-trip, proximity, stops, ...).
+Reference answers for the dev slice are in `questions/answers.json`:
+
+```sh
+uv run ais questions           # regenerate answers.json
+uv run ais questions --check   # verify it (also run by `pytest` when the dev slice exists)
+```
+
+Four questions also have an independent `check_sql` that must give the same answer.
+
 ## Layout
 
 ```
@@ -46,6 +59,7 @@ src/ais/
   derive.py        bad-fix removal, stop detection, trip segmentation, simplified geometry
   store/base.py    AisStore Protocol (DuckDB now, Postgres/PostGIS later)
   store/duckdb_store.py
+  questions.py     question set loader and answer runner
   api.py           FastAPI app, server-side limits
   cli.py           `uv run ais --help`
 data/              raw/ -> clean/ -> derived/ (git-ignored, see data/README.md)
