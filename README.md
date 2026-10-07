@@ -65,3 +65,78 @@ scenario per rule. `tests/test_dev_slice.py` adds checks on the real dev slice w
 
 To eyeball segmentation (bugs show up visually, not in tables):
 `uv run python scripts/plot_trips.py` writes `data/derived/plots/trips.png`.
+
+## Agent harness (AI-LAB)
+
+An LLM agent that answers questions about AIS data by writing SQL. It runs on AAU's AI-LAB
+cluster (SLURM + Singularity + Ceph) and is separate from the `src/ais` pipeline above: it
+reads the full DMA months at `data/processed/ais/date=YYYY-MM-DD/ais.parquet` under the
+project folder, not `data/clean/`.
+
+```
+vLLM (Qwen3-8B, hermes tool calling, GPU job)      slurm/serve_llm.slurm
+  -> agent loop: chat, tool calls, final answer     harness/agent.py
+     -> query_ais_data: DuckDB over Hive-partitioned harness/ais_tool.py
+        Parquet, read-only SQL (SELECT/WITH only, banned keywords, LIMIT capped at 20000,
+        30 s timeout)
+  -> HTTP: GET /health, POST /ask                    harness/api.py
+```
+
+```
+harness/           agent.py, ais_tool.py, api.py (flat imports, run from this folder)
+slurm/             serve_llm.slurm (vLLM server), model_download.slurm (Hugging Face -> models/)
+scripts/           auto_submit_llm.sh (cron restart), setup_llm_env.sh (builds ~/llm_venv)
+legacy/            superseded: llm_watchdog.slurm (self-rescheduling job, replaced by cron),
+                   fix_cuda_libs.sh (libcuda workaround, replaced by a bind mount in serve_llm)
+```
+
+Paths default to `/ceph/project/P7-Agent-Harness`. Set `P7_PROJECT_DIR` to override them in
+the harness and `auto_submit_llm.sh`; the SLURM scripts read `PROJECT_DIR` (their
+`#SBATCH --output` log paths are fixed).
+
+### Restart chain
+
+The vLLM job has a 12 h walltime, so cron restarts it twice a day:
+
+```
+cron 05:00 and 17:00
+  -> ~/auto_submit_llm.sh       exits unless ~/.llm_auto exists; scancels llm-serve, waits
+                                for it to leave the queue, then sbatch from the project folder
+  -> slurm/serve_llm.slurm      exits if serving/STOP exists; writes host:port to
+                                serving/current_endpoint.txt, then starts vllm serve on :8000
+  -> harness/agent.py           reads serving/current_endpoint.txt on every request
+```
+
+The endpoint file is written when the job starts, before the model has loaded, so expect a
+few minutes of connection errors after a restart. Always submit `serve_llm.slurm` from the
+project folder: it falls back to `$SLURM_SUBMIT_DIR` to find `models/` and `serving/`.
+
+The live chain runs `~/auto_submit_llm.sh` and the project folder's `slurm/serve_llm.slurm`,
+not the copies in this repo. Copy changes over deliberately. Example crontab (`crontab -e`):
+
+```
+0 5,17 * * * ~/auto_submit_llm.sh >> ~/auto_submit_llm.log 2>&1
+```
+
+Pause: `rm ~/.llm_auto` (cron) or `touch serving/STOP` (job), then `scancel --name=llm-serve`.
+
+### Running the agent and the API
+
+The harness needs its own venv. Never install into `~/llm_venv`: vLLM 0.29.0 pins
+`fastapi[standard]>=0.133.0,<0.137.0`.
+
+```sh
+python3 -m venv ~/harness_venv
+~/harness_venv/bin/pip install -r requirements-harness.txt
+source ~/harness_venv/bin/activate
+cd harness
+
+python3 agent.py "How many distinct vessels were seen on 2025-12-01?"
+
+uvicorn api:app --host 0.0.0.0 --port 8100     # on the login node
+curl -X POST http://ailab-fe01:8100/ask -H "Content-Type: application/json" \
+    -d '{"question": "How many distinct vessels were seen on 2025-12-01?"}'
+```
+
+`/ask` also takes `enable_thinking` (Qwen3 reasoning, default false) and `max_turns`
+(default 6) and returns the answer plus every SQL call and its result.

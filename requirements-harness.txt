@@ -1,0 +1,8 @@
+# Agent harness (harness/): its own venv, separate from ~/llm_venv.
+# Do not install these into the vLLM venv: vLLM 0.29.0 pins
+# fastapi[standard]>=0.133.0,<0.137.0 and newer versions break it.
+duckdb
+pandas
+openai
+fastapi
+uvicorn[standard]

@@ -18,3 +18,21 @@ data/*.duckdb
 data/*.duckdb.wal
 
 .DS_Store
+
+# Cluster project folder (/ceph/project/P7-Agent-Harness): never commit these
+models/
+logs/
+envs/
+serving/
+*.parquet
+*.log
+slurm-*.out
+*.out
+*.err
+
+# Credentials
+.env
+*.token
+*token*.txt
+.netrc
+.huggingface/
