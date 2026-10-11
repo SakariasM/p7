@@ -84,8 +84,10 @@ vLLM (Qwen3-8B, hermes tool calling, GPU job)      slurm/serve_llm.slurm
 
 ```
 harness/           agent.py, ais_tool.py, api.py (flat imports, run from this folder)
-                   build_context.py -> schema_context.md, eval_sql.py + eval/ (text-to-SQL)
-slurm/             serve_llm.slurm (vLLM server), model_download.slurm (Hugging Face -> models/)
+                   build_context.py -> schema_context.md, eval_sql.py + eval/ (text-to-SQL),
+                   gen_sql_data.py + sql_templates.py (training data)
+slurm/             serve_llm.slurm (vLLM server), model_download.slurm (Hugging Face -> models/),
+                   gen_sql_data.slurm (text-to-SQL training data, CPU)
 scripts/           auto_submit_llm.sh (cron restart), setup_llm_env.sh (builds ~/llm_venv)
 legacy/            superseded: llm_watchdog.slurm (self-rescheduling job, replaced by cron),
                    fix_cuda_libs.sh (libcuda workaround, replaced by a bind mount in serve_llm)
@@ -113,6 +115,22 @@ python3 build_context.py      # schema_context.md, the prompt for teacher, stude
 python3 eval_sql.py answers   # reference results -> eval/answers.json
 python3 eval_sql.py run --out ../../logs/eval/run.jsonl    # served model, see --help
 ```
+
+Training data (step 3) comes from `harness/gen_sql_data.py`, run as a CPU job against the
+llm-serve teacher; output goes to `data/text2sql/` in the project folder, not the repo:
+
+```sh
+sbatch slurm/gen_sql_data.slurm templates --per-template 60   # from the repo root
+sbatch slurm/gen_sql_data.slurm freeform --prompts 600
+sbatch slurm/gen_sql_data.slurm export                        # train.jsonl, val.jsonl
+```
+
+`templates` fills the 30 templates in `sql_templates.py` with real sampled values, keeps SQL
+that runs with a non-trivial answer, and adds teacher rewrites that keep every date, place,
+name, number and condition (checked by regex, SQL-like wording rejected). `freeform` keeps a
+teacher-written question when 3 of 4 sampled SQL answers agree. Dates 20-26 Sep 2026 are
+never sampled, and `export` drops eval questions, so the eval stays held out. The job needs
+`envs/harness` (see the header of `slurm/gen_sql_data.slurm`).
 
 A prediction is correct when its result has the reference rows (extra columns, row order
 and rounding are ignored). Qwen3-8B, single shot, no thinking, on 2026-10-11: 12/22 (8/14
