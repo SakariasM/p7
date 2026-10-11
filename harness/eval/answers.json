@@ -1,0 +1,211 @@
+{
+ "vessels_on_day": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    5541
+   ]
+  ]
+ },
+ "vessels_all_days": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    3258
+   ]
+  ]
+ },
+ "most_reports_day": {
+  "columns": [
+   "mmsi"
+  ],
+  "rows": [
+   [
+    273298600
+   ]
+  ]
+ },
+ "oresund_noon": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    324
+   ]
+  ]
+ },
+ "oresund_busiest_hour": {
+  "columns": [
+   "hour_utc"
+  ],
+  "rows": [
+   [
+    16
+   ]
+  ]
+ },
+ "position_at_time": {
+  "columns": [
+   "lat",
+   "lon"
+  ],
+  "rows": [
+   [
+    56.033222,
+    12.618245
+   ]
+  ]
+ },
+ "crowded_cell": {
+  "columns": [
+   "lat_min",
+   "lon_min"
+  ],
+  "rows": [
+   [
+    55.6,
+    12.6
+   ]
+  ]
+ },
+ "fishing_underway": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    140
+   ]
+  ]
+ },
+ "cargo_speed_kattegat": {
+  "columns": [
+   "avg_sog_kn"
+  ],
+  "rows": [
+   [
+    11.156970924010286
+   ]
+  ]
+ },
+ "near_tycho_brahe": {
+  "columns": [
+   "mmsi"
+  ],
+  "rows": [
+   [
+    219000368
+   ],
+   [
+    219010747
+   ],
+   [
+    219024336
+   ],
+   [
+    219622000
+   ],
+   [
+    246594000
+   ]
+  ]
+ },
+ "closest_pair_oresund": {
+  "columns": [
+   "mmsi_a",
+   "mmsi_b"
+  ],
+  "rows": [
+   [
+    219006007,
+    219006387
+   ]
+  ]
+ },
+ "tanker_destinations": {
+  "columns": [
+   "destination"
+  ],
+  "rows": [
+   [
+    "SEGOT"
+   ],
+   [
+    "FOR ORDERS"
+   ],
+   [
+    "NLRTM"
+   ]
+  ]
+ },
+ "mega_ships": {
+  "columns": [
+   "mmsi"
+  ],
+  "rows": [
+   [
+    211151710
+   ],
+   [
+    215199000
+   ],
+   [
+    218006290
+   ],
+   [
+    219019139
+   ],
+   [
+    219864000
+   ],
+   [
+    374637000
+   ],
+   [
+    440350000
+   ],
+   [
+    440363000
+   ],
+   [
+    477100400
+   ],
+   [
+    477166500
+   ],
+   [
+    477712400
+   ],
+   [
+    477886300
+   ],
+   [
+    563254400
+   ],
+   [
+    563254800
+   ],
+   [
+    563262500
+   ],
+   [
+    636026627
+   ]
+  ]
+ },
+ "duplicate_share": {
+  "columns": [
+   "pct"
+  ],
+  "rows": [
+   [
+    52.5069664283032
+   ]
+  ]
+ }
+}

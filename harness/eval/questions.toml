@@ -1,0 +1,215 @@
+# Held-out text-to-SQL questions. Never use these or their paraphrases as training data.
+#
+# Ported from the Phase 3 question set (commit 46063fb) to the harness views in
+# ais_tool.SETUP_SQL; the trip and stop questions are left out because the harness has no
+# derived trips/stops tables. Dates without a year are in 2026; questions that had no date
+# now name the original dev slice (22-24 September). Conventions follow schema_context.md.
+#
+# Each sql returns only the columns that answer the question; eval_sql.py accepts extra
+# columns, any row order and small rounding differences. Answers live in answers.json
+# (`python3 eval_sql.py answers`); check_sql must give the same result.
+
+[[question]]
+id = "vessels_on_day"
+question = "How many different vessels were seen on 23 September?"
+paraphrases = [
+  "Number of unique ships on Sept 23rd",
+  "How many ships were sending AIS on the 23rd of September?",
+]
+tags = ["time_window"]
+sql = """
+SELECT count(DISTINCT mmsi) AS vessels
+FROM vessel_positions WHERE date = DATE '2026-09-23'
+"""
+check_sql = """
+SELECT count(*) AS vessels FROM (
+  SELECT mmsi FROM vessel_positions
+  WHERE date = DATE '2026-09-23'
+    AND ts >= TIMESTAMP '2026-09-23 00:00:00' AND ts < TIMESTAMP '2026-09-24 00:00:00'
+  GROUP BY mmsi
+)
+"""
+
+[[question]]
+id = "vessels_all_days"
+question = "How many vessels were seen on every one of the three days from 22 to 24 September?"
+tags = ["time_window"]
+sql = """
+SELECT count(*) AS vessels FROM (
+  SELECT mmsi FROM vessel_positions
+  WHERE date BETWEEN DATE '2026-09-22' AND DATE '2026-09-24'
+  GROUP BY mmsi HAVING count(DISTINCT date) = 3
+)
+"""
+
+[[question]]
+id = "most_reports_day"
+question = "Which vessel sent the most position reports on 24 September?"
+tags = ["time_window", "vessel_lookup"]
+sql = """
+SELECT mmsi FROM vessel_positions
+WHERE date = DATE '2026-09-24'
+GROUP BY mmsi ORDER BY count(DISTINCT ts) DESC, mmsi LIMIT 1
+"""
+
+[[question]]
+id = "oresund_noon"
+question = "How many vessels were in the Øresund between 12:00 and 13:00 UTC on 22 September?"
+paraphrases = [
+  "Count ships in the Sound around noon on 22 September",
+  "How busy was the Øresund from 12 to 13 on Sept 22?",
+]
+tags = ["spatial_range", "time_window"]
+sql = """
+SELECT count(DISTINCT mmsi) AS vessels FROM vessel_positions
+WHERE date = DATE '2026-09-22'
+  AND ts >= TIMESTAMP '2026-09-22 12:00:00' AND ts < TIMESTAMP '2026-09-22 13:00:00'
+  AND lon BETWEEN 12.40 AND 12.95 AND lat BETWEEN 55.50 AND 56.15
+"""
+
+[[question]]
+id = "oresund_busiest_hour"
+question = "Which hour on 24 September had the most vessels in the Øresund?"
+tags = ["spatial_range", "time_window"]
+sql = """
+SELECT hour(ts) AS hour_utc FROM vessel_positions
+WHERE date = DATE '2026-09-24'
+  AND lon BETWEEN 12.40 AND 12.95 AND lat BETWEEN 55.50 AND 56.15
+GROUP BY 1 ORDER BY count(DISTINCT mmsi) DESC, hour_utc LIMIT 1
+"""
+
+[[question]]
+id = "position_at_time"
+question = "Where was TYCHO BRAHE at 12:00 UTC on 23 September?"
+paraphrases = [
+  "Last known position of the Tycho Brahe ferry at noon on 23 September",
+]
+tags = ["vessel_lookup", "time_window"]
+sql = """
+SELECT lat, lon FROM vessel_positions
+WHERE name = 'TYCHO BRAHE' AND date = DATE '2026-09-23'
+  AND ts <= TIMESTAMP '2026-09-23 12:00:00'
+ORDER BY ts DESC LIMIT 1
+"""
+check_sql = """
+SELECT arg_max(lat, ts) AS lat, arg_max(lon, ts) AS lon FROM vessel_positions
+WHERE mmsi = 219230000 AND date = DATE '2026-09-23'
+  AND ts <= TIMESTAMP '2026-09-23 12:00:00'
+"""
+
+[[question]]
+id = "crowded_cell"
+question = "Which 0.1-degree grid cell had the most vessels between 12:00 and 12:10 UTC on 23 September? Give the cell's south-west corner."
+tags = ["spatial_range", "time_window"]
+sql = """
+SELECT floor(lat * 10) / 10 AS lat_min, floor(lon * 10) / 10 AS lon_min
+FROM vessel_positions
+WHERE date = DATE '2026-09-23'
+  AND ts >= TIMESTAMP '2026-09-23 12:00:00' AND ts < TIMESTAMP '2026-09-23 12:10:00'
+GROUP BY 1, 2 ORDER BY count(DISTINCT mmsi) DESC, lat_min, lon_min LIMIT 1
+"""
+
+[[question]]
+id = "fishing_underway"
+question = "How many fishing vessels were underway at 06:00 UTC on 24 September?"
+paraphrases = ["How many fishing boats were out moving at 6 in the morning on 24 September?"]
+tags = ["time_window", "ship_type"]
+sql = """
+SELECT count(*) AS vessels FROM (
+  SELECT mmsi, arg_max(sog, ts) AS sog FROM vessel_positions
+  WHERE date = DATE '2026-09-24' AND ship_type = 'Fishing'
+    AND ts > TIMESTAMP '2026-09-24 05:50:00' AND ts <= TIMESTAMP '2026-09-24 06:00:00'
+  GROUP BY mmsi
+) WHERE sog >= 1
+"""
+
+[[question]]
+id = "cargo_speed_kattegat"
+question = "What was the average speed of cargo ships underway in the Kattegat from 22 to 24 September?"
+tags = ["spatial_range", "ship_type", "time_window"]
+sql = """
+SELECT avg(sog) AS avg_sog_kn FROM vessel_positions
+WHERE date BETWEEN DATE '2026-09-22' AND DATE '2026-09-24'
+  AND ship_type = 'Cargo' AND sog >= 1
+  AND lon BETWEEN 10.50 AND 12.50 AND lat BETWEEN 56.00 AND 57.60
+"""
+
+[[question]]
+id = "near_tycho_brahe"
+question = "Which vessels came within 1 km of TYCHO BRAHE between 12:00 and 13:00 UTC on 23 September?"
+paraphrases = ["What ships passed close to the Tycho Brahe ferry between 12 and 13 on 23 September?"]
+tags = ["proximity", "time_window", "vessel_lookup"]
+# Positions are compared minute by minute (each vessel's latest report in that minute).
+sql = """
+WITH m AS (
+  SELECT mmsi, date_trunc('minute', ts) AS minute,
+         arg_max(lat, ts) AS lat, arg_max(lon, ts) AS lon
+  FROM vessel_positions
+  WHERE date = DATE '2026-09-23'
+    AND ts >= TIMESTAMP '2026-09-23 12:00:00' AND ts < TIMESTAMP '2026-09-23 13:00:00'
+    AND lon BETWEEN 12.40 AND 12.95 AND lat BETWEEN 55.80 AND 56.20
+  GROUP BY 1, 2
+), ferry AS (
+  SELECT * FROM m WHERE mmsi = (
+    SELECT any_value(mmsi) FROM vessel_positions
+    WHERE date = DATE '2026-09-23' AND name = 'TYCHO BRAHE')
+)
+SELECT DISTINCT o.mmsi
+FROM ferry f JOIN m o ON o.minute = f.minute AND o.mmsi <> f.mmsi
+WHERE haversine_m(f.lat, f.lon, o.lat, o.lon) <= 1000
+ORDER BY o.mmsi
+"""
+
+[[question]]
+id = "closest_pair_oresund"
+question = "Which two moving vessels came closest to each other in the Øresund between 12:00 and 12:10 UTC on 24 September?"
+tags = ["proximity", "spatial_range", "time_window"]
+sql = """
+WITH m AS (
+  SELECT mmsi, date_trunc('minute', ts) AS minute,
+         arg_max(lat, ts) AS lat, arg_max(lon, ts) AS lon, arg_max(sog, ts) AS sog
+  FROM vessel_positions
+  WHERE date = DATE '2026-09-24'
+    AND ts >= TIMESTAMP '2026-09-24 12:00:00' AND ts < TIMESTAMP '2026-09-24 12:10:00'
+    AND lon BETWEEN 12.40 AND 12.95 AND lat BETWEEN 55.50 AND 56.15
+  GROUP BY 1, 2
+)
+SELECT a.mmsi AS mmsi_a, b.mmsi AS mmsi_b
+FROM m a JOIN m b ON a.minute = b.minute AND a.mmsi < b.mmsi
+WHERE a.sog >= 1 AND b.sog >= 1
+GROUP BY 1, 2
+ORDER BY min(haversine_m(a.lat, a.lon, b.lat, b.lon)), mmsi_a, mmsi_b LIMIT 1
+"""
+
+[[question]]
+id = "tanker_destinations"
+question = "What were the three most common destinations declared by tankers from 22 to 24 September?"
+tags = ["vessel_lookup", "ship_type", "time_window"]
+sql = """
+SELECT upper(destination) AS destination FROM vessel_positions
+WHERE date BETWEEN DATE '2026-09-22' AND DATE '2026-09-24' AND ship_type = 'Tanker'
+GROUP BY 1 ORDER BY count(DISTINCT mmsi) DESC, destination LIMIT 3
+"""
+
+[[question]]
+id = "mega_ships"
+question = "Which cargo ships at least 390 m long were seen from 22 to 24 September?"
+paraphrases = ["List the cargo vessels with a length of 390 metres or more between 22 and 24 September"]
+tags = ["vessel_lookup", "ship_type", "time_window"]
+sql = """
+SELECT DISTINCT mmsi FROM vessel_positions
+WHERE date BETWEEN DATE '2026-09-22' AND DATE '2026-09-24'
+  AND ship_type = 'Cargo' AND length >= 390
+ORDER BY mmsi
+"""
+
+[[question]]
+id = "duplicate_share"
+question = "What percentage of the raw AIS rows on 22 September were duplicate receptions of the same report?"
+tags = ["data_quality"]
+sql = """
+SELECT 100.0 * (count(*) - (SELECT count(*) FROM (SELECT DISTINCT * FROM ais
+                                                   WHERE date = DATE '2026-09-22')))
+       / count(*) AS pct
+FROM ais WHERE date = DATE '2026-09-22'
+"""

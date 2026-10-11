@@ -84,6 +84,7 @@ vLLM (Qwen3-8B, hermes tool calling, GPU job)      slurm/serve_llm.slurm
 
 ```
 harness/           agent.py, ais_tool.py, api.py (flat imports, run from this folder)
+                   build_context.py -> schema_context.md, eval_sql.py + eval/ (text-to-SQL)
 slurm/             serve_llm.slurm (vLLM server), model_download.slurm (Hugging Face -> models/)
 scripts/           auto_submit_llm.sh (cron restart), setup_llm_env.sh (builds ~/llm_venv)
 legacy/            superseded: llm_watchdog.slurm (self-rescheduling job, replaced by cron),
@@ -93,6 +94,31 @@ legacy/            superseded: llm_watchdog.slurm (self-rescheduling job, replac
 Paths default to `/ceph/project/P7-Agent-Harness`. Set `P7_PROJECT_DIR` to override them in
 the harness and `auto_submit_llm.sh`; the SLURM scripts read `PROJECT_DIR` (their
 `#SBATCH --output` log paths are fixed).
+
+Each query connection gets two views and a macro (`ais_tool.SETUP_SQL`): `ais` is every raw
+row; `vessel_positions` keeps Class A/B ships with a ship MMSI inside the DMA coverage box and
+sets the 102.2 kn "not available" SOG to NULL, the same rules as `src/ais/clean.py`. Raw data
+is about half exact duplicates, which the view keeps, hence `count(DISTINCT mmsi)`.
+`haversine_m(lat1, lon1, lat2, lon2)` gives metres.
+
+### Text-to-SQL eval
+
+The planned SQL student (Qwen2.5-Coder-1.5B, distilled from Qwen3-8B) is scored on
+`harness/eval/questions.toml`: 14 questions plus paraphrases ported from the Phase 3 set
+(the trip and stop questions need derived tables the harness lacks). Never train on them.
+
+```sh
+cd harness
+python3 build_context.py      # schema_context.md, the prompt for teacher, student and eval
+python3 eval_sql.py answers   # reference results -> eval/answers.json
+python3 eval_sql.py run --out ../../logs/eval/run.jsonl    # served model, see --help
+```
+
+A prediction is correct when its result has the reference rows (extra columns, row order
+and rounding are ignored). Qwen3-8B, single shot, no thinking, on 2026-10-11: 12/22 (8/14
+canonical) with the current context, 6/22 with the first draft, before the rules on
+`count(DISTINCT ts)`, timestamp windows and upper-case names. It still ignores the
+`sog >= 1` rule, and fails proximity questions and the duplicate share.
 
 ### Restart chain
 
