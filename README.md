@@ -68,7 +68,7 @@ To eyeball segmentation (bugs show up visually, not in tables):
 
 ## Agent harness (AI-LAB)
 
-An LLM agent that answers questions about AIS data by writing SQL. It runs on AAU's AI-LAB
+LLM agents that answer questions about AIS data through SQL. They run on AAU's AI-LAB
 cluster (SLURM + Singularity + Ceph) and is separate from the `src/ais` pipeline above: it
 reads the full DMA months at `data/processed/ais/date=YYYY-MM-DD/ais.parquet` under the
 project folder, not `data/clean/`.
@@ -82,12 +82,28 @@ vLLM (Qwen3-8B, hermes tool calling, GPU job)      slurm/serve_llm.slurm
   -> HTTP: GET /health, POST /ask                    harness/api.py
 ```
 
+Two-model mode (default for `/ask`), with the single agent above kept as a baseline:
+
 ```
-harness/           agent.py, ais_tool.py, api.py (flat imports, run from this folder)
+Qwen3-8B planner: plan, ask_data(request), check, answer   harness/planner.py
+  -> SQL student (Qwen2.5-Coder-1.5B, fine-tuned)          slurm/serve_student.slurm
+     request + schema_context.md -> SQL
+  -> query_ais_data (same guardrails) -> rows or error back to the planner
+```
+
+The planner never sees the schema or writes SQL. Each `ask_data` request must stand alone
+(full dates, UTC times, named places, vessel names in capitals), the way the student was
+trained; the planner does the arithmetic across requests and rephrases failed ones (an
+identical failed request is refused, since the student is deterministic).
+
+```
+harness/           agent.py, planner.py, ais_tool.py, api.py (flat imports, run from here)
                    build_context.py -> schema_context.md, eval_sql.py + eval/ (text-to-SQL),
                    gen_sql_data.py + sql_templates.py (training data)
-slurm/             serve_llm.slurm (vLLM server), model_download.slurm (Hugging Face -> models/),
-                   gen_sql_data.slurm (text-to-SQL training data, CPU)
+slurm/             serve_llm.slurm (vLLM server), serve_student.slurm (SQL student server),
+                   model_download.slurm (Hugging Face -> models/), gen_sql_data.slurm
+                   (training data, CPU), train_student.slurm, eval_student.slurm
+training/          train_student.py (LoRA fine-tune of the SQL student)
 scripts/           auto_submit_llm.sh (cron restart), setup_llm_env.sh (builds ~/llm_venv)
 legacy/            superseded: llm_watchdog.slurm (self-rescheduling job, replaced by cron),
                    fix_cuda_libs.sh (libcuda workaround, replaced by a bind mount in serve_llm)
@@ -149,6 +165,9 @@ cron 05:00 and 17:00
   -> slurm/serve_llm.slurm      exits if serving/STOP exists; writes host:port to
                                 serving/current_endpoint.txt, then starts vllm serve on :8000
   -> harness/agent.py           reads serving/current_endpoint.txt on every request
+  -> p7/slurm/serve_student.slurm   (repo version of auto_submit_llm.sh only) the SQL
+                                student on :8001, writes serving/student_endpoint.txt,
+                                read by harness/planner.py
 ```
 
 The endpoint file is written when the job starts, before the model has loaded, so expect a
@@ -162,7 +181,9 @@ not the copies in this repo. Copy changes over deliberately. Example crontab (`c
 0 5,17 * * * ~/auto_submit_llm.sh >> ~/auto_submit_llm.log 2>&1
 ```
 
-Pause: `rm ~/.llm_auto` (cron) or `touch serving/STOP` (job), then `scancel --name=llm-serve`.
+Pause: `rm ~/.llm_auto` (cron) or `touch serving/STOP` (jobs), then
+`scancel --name=llm-serve --name=llm-student`. Start the student by hand with
+`sbatch slurm/serve_student.slurm [MODEL_DIR]` (default `models/qwen2.5-coder-1.5b-sql-v1`).
 
 ### Running the agent and the API
 
@@ -175,12 +196,14 @@ python3 -m venv ~/harness_venv
 source ~/harness_venv/bin/activate
 cd harness
 
-python3 agent.py "How many distinct vessels were seen on 2025-12-01?"
+python3 planner.py "How many tankers were in the Kattegat on 3 March 2026?"   # two models
+python3 agent.py "How many distinct vessels were seen on 2025-12-01?"          # 8B only
 
 uvicorn api:app --host 0.0.0.0 --port 8100     # on the login node
 curl -X POST http://ailab-fe01:8100/ask -H "Content-Type: application/json" \
     -d '{"question": "How many distinct vessels were seen on 2025-12-01?"}'
 ```
 
-`/ask` also takes `enable_thinking` (Qwen3 reasoning, default false) and `max_turns`
-(default 6) and returns the answer plus every SQL call and its result.
+`/ask` also takes `mode` (`"planner"`, the default, or `"single"`), `enable_thinking` (Qwen3
+reasoning, default false) and `max_turns` (default 10 planner, 6 single), and returns the
+answer, the planner's plan, and every call with its request, SQL and result.

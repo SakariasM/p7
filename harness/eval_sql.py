@@ -5,19 +5,23 @@ Text-to-SQL execution accuracy on the held-out questions in eval/questions.toml.
     python3 eval_sql.py answers                       # reference results -> eval/answers.json
     python3 eval_sql.py run                           # current vLLM model (Qwen3-8B)
     python3 eval_sql.py run --model NAME --base-url http://host:port/v1 --out results.jsonl
+    python3 eval_sql.py agent --mode planner --out planner.jsonl   # or --mode single
 
 `run` gives the model schema_context.md as the system prompt and each question (and each
 paraphrase) as the user message, takes one SQL answer at temperature 0, runs it through
 query_ais_data with the production guardrails, and compares the result with the reference.
 A prediction counts as correct when, for some choice of its columns, it has the same rows
 as the reference (any row order, extra columns allowed, numbers within rounding).
+
+`agent` runs a whole agent (planner.py, or the single-model agent.py) on each question and
+counts it as answered when any query the agent ran returned the reference rows. That checks
+the data the agent fetched, not its written answer; the answers are in the JSONL to review.
 """
 
 import argparse
 import itertools
 import json
 import math
-import re
 import sys
 import time
 from pathlib import Path
@@ -27,7 +31,7 @@ try:
 except ModuleNotFoundError:  # Python < 3.11 on the login node
     import tomli as tomllib
 
-from ais_tool import query_ais_data
+from ais_tool import extract_sql, query_ais_data
 
 HERE = Path(__file__).parent
 QUESTIONS_FILE = HERE / "eval" / "questions.toml"
@@ -99,12 +103,6 @@ def results_match(ref_rows: list[list], pred_rows: list[list]) -> bool:
     return False
 
 
-def extract_sql(text: str) -> str:
-    text = re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL)
-    fenced = re.findall(r"```(?:sql)?\s*(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
-    return (fenced[-1] if fenced else text).strip()
-
-
 def cmd_answers(_args) -> None:
     answers = {}
     for q in load_questions():
@@ -169,6 +167,52 @@ def cmd_run(args) -> None:
         print(f"wrote {args.out}")
 
 
+def cmd_agent(args) -> None:
+    if args.mode == "planner":
+        from planner import run
+    else:
+        from agent import run
+    answers = json.loads(ANSWERS_FILE.read_text())
+
+    records = []
+    for q in load_questions():
+        for i, text in enumerate([q["question"], *q.get("paraphrases", [])]):
+            t = time.time()
+            try:
+                trace = run(text, return_trace=True)
+            except Exception as e:  # endpoint down, context too long, ...
+                trace = {"answer": f"agent error: {e}", "tool_calls": []}
+            results = [json.loads(json.dumps(c["result"], default=str)) for c in trace["tool_calls"]]
+            correct = any(
+                "error" not in r and results_match(answers[q["id"]]["rows"], r["rows"])
+                for r in results
+            )
+            records.append({
+                "id": q["id"], "variant": i, "question": text, "tags": q["tags"],
+                "correct": correct, "answer": trace["answer"], "plan": trace.get("plan"),
+                "calls": [{"request": c.get("request"), "sql": c["sql"],
+                           "error": c["result"].get("error")} for c in trace["tool_calls"]],
+                "seconds": round(time.time() - t, 1),
+            })
+            n_err = sum(c["error"] is not None for c in records[-1]["calls"])
+            print(f"{'ok ' if correct else '-- '} {q['id']:24} v{i}  "
+                  f"{len(results)} calls, {n_err} errors, {records[-1]['seconds']}s", flush=True)
+
+    n = len(records)
+    n_ok = sum(r["correct"] for r in records)
+    canonical = [r for r in records if r["variant"] == 0]
+    print(f"\nagent {args.mode}")
+    print(f"all variants: {n_ok}/{n} = {n_ok / n:.0%}")
+    print(f"canonical:    {sum(r['correct'] for r in canonical)}/{len(canonical)}")
+    print(f"calls/question: {sum(len(r['calls']) for r in records) / n:.1f}, "
+          f"seconds/question: {sum(r['seconds'] for r in records) / n:.0f}")
+    if args.out:
+        with open(args.out, "w") as f:
+            for r in records:
+                f.write(json.dumps(r, ensure_ascii=False, default=str) + "\n")
+        print(f"wrote {args.out}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0].strip())
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -178,6 +222,10 @@ def main() -> None:
     run.add_argument("--base-url", help="OpenAI-compatible URL (default: current endpoint)")
     run.add_argument("--out", help="write per-question results as JSONL")
     run.set_defaults(func=cmd_run)
+    agent = sub.add_parser("agent", help="score a whole agent end to end")
+    agent.add_argument("--mode", choices=["planner", "single"], default="planner")
+    agent.add_argument("--out", help="write per-question results as JSONL")
+    agent.set_defaults(func=cmd_agent)
     args = parser.parse_args()
     args.func(args)
 

@@ -80,6 +80,13 @@ def _validate(sql: str) -> str:
     return stripped
 
 
+def extract_sql(text: str) -> str:
+    """The SQL in a model reply: drops <think> blocks, takes the last fenced block if any."""
+    text = re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL)
+    fenced = re.findall(r"```(?:sql)?\s*(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
+    return (fenced[-1] if fenced else text).strip()
+
+
 def connect() -> duckdb.DuckDBPyConnection:
     """An in-memory connection with the views and macros from SETUP_SQL."""
     con = duckdb.connect()

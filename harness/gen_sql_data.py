@@ -38,9 +38,9 @@ from pathlib import Path
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
 from agent import MODEL_PATH, get_base_url
-from ais_tool import PROJECT_DIR, connect
+from ais_tool import PROJECT_DIR, connect, extract_sql
 from build_context import PLACES
-from eval_sql import CONTEXT_FILE, extract_sql, load_questions, results_match, run_sql
+from eval_sql import CONTEXT_FILE, load_questions, results_match, run_sql
 from sql_templates import EXCLUDED_DATE_RE, TEMPLATES, Sampler, d_text, place_text
 
 OUT_DIR = PROJECT_DIR / "data" / "text2sql"
