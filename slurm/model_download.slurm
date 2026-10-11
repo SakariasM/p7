@@ -21,8 +21,10 @@
 #     cd /ceph/project/P7-Agent-Harness
 #     sbatch slurm/model_download.slurm
 #
-# Change MODEL_ID/LOCAL_NAME below for a different model later. For a
-# gated model (e.g. Llama), export HF_TOKEN before submitting and add
+# For a different model, export MODEL_ID and LOCAL_NAME before submitting, e.g.
+#     MODEL_ID=Qwen/Qwen2.5-Coder-1.5B-Instruct LOCAL_NAME=qwen2.5-coder-1.5b-instruct \
+#         sbatch slurm/model_download.slurm
+# For a gated model (e.g. Llama), export HF_TOKEN before submitting and add
 # --token "$HF_TOKEN" to the hf download line below.
 
 set -euo pipefail
@@ -32,8 +34,8 @@ CONTAINER="/ceph/container/pytorch/pytorch_25.12.sif"
 VENV_DIR="$HOME/llm_venv"
 PROJECT_DIR="${PROJECT_DIR:-${SLURM_SUBMIT_DIR:-/ceph/project/P7-Agent-Harness}}"
 
-MODEL_ID="Qwen/Qwen3-8B"
-LOCAL_NAME="qwen3-8b"
+MODEL_ID="${MODEL_ID:-Qwen/Qwen3-8B}"
+LOCAL_NAME="${LOCAL_NAME:-qwen3-8b}"
 MODEL_DIR="$PROJECT_DIR/models/$LOCAL_NAME"
 
 echo "=== Model Download Job ==="
