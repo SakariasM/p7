@@ -24,6 +24,21 @@ PARQUET_GLOB = f"{DATA_DIR}/*/ais.parquet"
 _DATES = sorted(p.parent.name.removeprefix("date=") for p in DATA_DIR.glob("date=*/ais.parquet"))
 DATE_RANGE = f"{_DATES[0]} through {_DATES[-1]}" if _DATES else "no dates (store is empty)"
 
+# Every query connection gets these. vessel_positions applies the same rules as the
+# src/ais cleaning steps and derive COVERAGE box; duplicates are kept (too costly per query).
+SETUP_SQL = f"""
+CREATE MACRO haversine_m(lat1, lon1, lat2, lon2) AS
+  2 * 6371008.8 * asin(sqrt(
+      pow(sin(radians(lat2 - lat1) / 2), 2)
+    + cos(radians(lat1)) * cos(radians(lat2)) * pow(sin(radians(lon2 - lon1) / 2), 2)));
+CREATE VIEW ais AS SELECT * FROM read_parquet('{PARQUET_GLOB}', hive_partitioning=1);
+CREATE VIEW vessel_positions AS
+  SELECT * REPLACE (CASE WHEN sog >= 102.2 THEN NULL ELSE sog END AS sog) FROM ais
+  WHERE mobile_type IN ('Class A', 'Class B')
+    AND mmsi BETWEEN 200000000 AND 799999999
+    AND lat BETWEEN 50 AND 64 AND lon BETWEEN -5 AND 32;
+"""
+
 DEFAULT_ROW_LIMIT = 1000
 MAX_ROW_LIMIT = 20000
 QUERY_TIMEOUT_SECONDS = 30
@@ -65,13 +80,22 @@ def _validate(sql: str) -> str:
     return stripped
 
 
+def connect() -> duckdb.DuckDBPyConnection:
+    """An in-memory connection with the views and macros from SETUP_SQL."""
+    con = duckdb.connect()
+    con.execute("SET enable_progress_bar = false")
+    if _DATES:
+        con.execute(SETUP_SQL)
+    return con
+
+
 def query_ais_data(sql: str) -> dict:
     try:
         safe_sql = _validate(sql)
     except QueryRejected as e:
         return {"error": str(e), "sql_attempted": sql}
 
-    con = duckdb.connect()
+    con = connect()
     result_holder = {}
     error_holder = {}
 
@@ -117,16 +141,23 @@ TOOL_SCHEMA = {
     "function": {
         "name": "query_ais_data",
         "description": (
-            "Run a read-only SQL SELECT query against the AIS vessel-trajectory "
-            "table and return the matching rows. Reference the table in FROM as: "
-            f"read_parquet('{PARQUET_GLOB}', hive_partitioning=1). "
-            "Columns: ts (TIMESTAMP), mobile_type, mmsi (BIGINT), lat, lon (DOUBLE), "
+            "Run a read-only DuckDB SQL SELECT query against Danish AIS vessel data "
+            "and return the matching rows. Query the view vessel_positions: ship "
+            "position reports (Class A/B transponders, ship MMSIs, positions within "
+            "50-64N 5W-32E; sog is NULL when not available). The view ais has every "
+            "raw row incl. base stations and bad fixes; use it only for data-quality "
+            "questions. "
+            "Columns: ts (TIMESTAMP, UTC), mobile_type, mmsi (BIGINT), lat, lon (DOUBLE), "
             "nav_status, rot, sog (speed over ground, knots), cog (course over ground), "
             "heading, imo, callsign, name, ship_type, cargo_type, width, length, "
             "pos_fix_device, draught, destination, eta (TIMESTAMP), data_source, "
             "dim_a, dim_b, dim_c, dim_d, date (DATE, partition column - always filter "
             f"on this first for performance; data covers {DATE_RANGE}, "
-            "about 19 million rows per day). Queries are cancelled after "
+            "about 19 million rows per day). The same report is often received several "
+            "times: count vessels with count(DISTINCT mmsi). Missing text values are "
+            "strings such as 'Undefined' or 'Unknown value', not NULL. "
+            "haversine_m(lat1, lon1, lat2, lon2) returns the distance in metres. "
+            "Queries are cancelled after "
             f"{QUERY_TIMEOUT_SECONDS}s: aggregates over more than about a month of "
             "rows will time out unless they also filter on mmsi or another narrow "
             "condition, so split long periods into smaller date ranges. "
