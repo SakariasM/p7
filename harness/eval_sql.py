@@ -18,6 +18,20 @@ counts it as answered when any query the agent ran returned the reference rows (
 Agents often fetch a broader table and pick the answer themselves, so it also checks whether
 every reference value appears in the final answer text ("answer": numbers within ~1%,
 strings case-insensitive, at most 10 reference rows). Answers are in the JSONL to review.
+
+Points (0-100, both commands):
+  correctness  CORRECT_POINTS * F1, where F1 is 1 for a correct result and otherwise the row
+               overlap between prediction and reference (best column matching, numbers to 2
+               decimals; fewer columns than the reference scale it down); 0 on error/timeout
+  speed        SPEED_POINTS * min(1, work_reference / work_query), only when F1 == 1, with
+               work = rows scanned + rows through all operators (DuckDB profile). Work does
+               not vary between runs or machines, unlike time; it catches a missing date
+               filter (rows scanned x365) and join blow-ups (cardinality).
+Wall-clock time (median of --repeats runs after a warm-up, floored at MIN_SECONDS) is still
+recorded, and VES (BIRD's valid efficiency score, correct * sqrt(t_reference / t_query)) is
+computed from it for comparison with the literature. In agent mode the query side is the
+sum over all the agent's successful calls; F1 is 1 when the data or answer check passes,
+else the best F1 of its calls; a timeout in any call forfeits the speed points.
 """
 
 import argparse
@@ -27,6 +41,7 @@ import math
 import re
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 try:
@@ -34,12 +49,16 @@ try:
 except ModuleNotFoundError:  # Python < 3.11 on the login node
     import tomli as tomllib
 
-from ais_tool import extract_sql, query_ais_data
+from ais_tool import QUERY_TIMEOUT_SECONDS, extract_sql, query_ais_data
 
 HERE = Path(__file__).parent
 QUESTIONS_FILE = HERE / "eval" / "questions.toml"
 ANSWERS_FILE = HERE / "eval" / "answers.json"
 CONTEXT_FILE = HERE / "schema_context.md"
+
+CORRECT_POINTS = 70
+SPEED_POINTS = 30
+MIN_SECONDS = 0.05
 
 
 def load_questions() -> list[dict]:
@@ -126,6 +145,75 @@ def answer_has_reference(answer: str, ref_rows: list[list]) -> bool:
     return True
 
 
+def _row_key(row: list) -> tuple:
+    return tuple(_sort_key(v) for v in row)
+
+
+def result_f1(ref_rows: list[list], pred_rows: list[list]) -> float:
+    """1.0 for a matching result, else the best row-overlap F1 over column matchings."""
+    if results_match(ref_rows, pred_rows):
+        return 1.0
+    if not ref_rows or not pred_rows:
+        return 0.0
+    n_ref, n_pred = len(ref_rows[0]), len(pred_rows[0])
+    k = min(n_ref, n_pred)
+    best = 0.0
+    for ref_cols in itertools.combinations(range(n_ref), k):
+        ref = Counter(_row_key([r[i] for i in ref_cols]) for r in ref_rows)
+        for cols in itertools.islice(itertools.permutations(range(n_pred), k), 500):
+            pred = Counter(_row_key([p[j] for j in cols]) for p in pred_rows)
+            matched = sum((ref & pred).values())
+            f1 = 2 * matched / (len(ref_rows) + len(pred_rows)) * k / n_ref
+            best = max(best, f1)
+    return round(min(best, 0.99), 3)  # 1.0 is reserved for results_match
+
+
+def measure(sql: str, repeats: int) -> dict:
+    """Deterministic work (one profiled run) and median wall-clock time after a warm-up."""
+    profiled = query_ais_data(sql, profile=True)
+    if "error" in profiled:
+        return {"work": None, "seconds": None}
+    times = sorted(query_ais_data(sql).get("elapsed_seconds", QUERY_TIMEOUT_SECONDS)
+                   for _ in range(repeats))
+    return {"work": profiled["rows_scanned"] + profiled["cardinality"],
+            "seconds": times[len(times) // 2]}
+
+
+def score(f1: float, ref: dict | None, query: dict | None) -> dict:
+    """Points (correctness * F1 + speed by work) and VES (by wall-clock), see module doc."""
+    points = CORRECT_POINTS * f1
+    speed_ratio, ves = None, 0.0
+    if f1 == 1.0 and ref and query and ref["work"] and query["work"]:
+        speed_ratio = ref["work"] / query["work"]
+        points += SPEED_POINTS * min(1.0, speed_ratio)
+        ves = math.sqrt(max(ref["seconds"], MIN_SECONDS) / max(query["seconds"], MIN_SECONDS))
+    return {"points": round(points, 1), "f1": f1, "ves": round(ves, 3),
+            "work_ratio": None if speed_ratio is None else round(speed_ratio, 4)}
+
+
+class ReferenceCosts:
+    """Work and time of each question's reference SQL, measured once per eval run."""
+
+    def __init__(self, questions: list[dict], repeats: int):
+        self._sql = {q["id"]: q["sql"] for q in questions}
+        self._repeats = repeats
+        self._costs: dict[str, dict] = {}
+
+    def __getitem__(self, qid: str) -> dict:
+        if qid not in self._costs:
+            self._costs[qid] = measure(self._sql[qid], self._repeats)
+        return self._costs[qid]
+
+
+def print_points(records: list[dict]) -> None:
+    n = len(records)
+    canonical = [r for r in records if r["variant"] == 0]
+    print(f"points:       mean {sum(r['points'] for r in records) / n:.1f} / 100 "
+          f"(canonical {sum(r['points'] for r in canonical) / len(canonical):.1f}), "
+          f"mean F1 {sum(r['f1'] for r in records) / n:.3f}, "
+          f"VES {sum(r['ves'] for r in records) / n:.3f}")
+
+
 def cmd_answers(_args) -> None:
     answers = {}
     for q in load_questions():
@@ -152,8 +240,10 @@ def cmd_run(args) -> None:
     system = CONTEXT_FILE.read_text()
     answers = json.loads(ANSWERS_FILE.read_text())
 
+    questions = load_questions()
+    ref_costs = ReferenceCosts(questions, args.repeats)
     records = []
-    for q in load_questions():
+    for q in questions:
         for i, text in enumerate([q["question"], *q.get("paraphrases", [])]):
             t = time.time()
             response = client.chat.completions.create(
@@ -168,13 +258,21 @@ def cmd_run(args) -> None:
             correct = "error" not in result and results_match(
                 answers[q["id"]]["rows"], result["rows"]
             )
+            f1 = 0.0 if "error" in result else result_f1(answers[q["id"]]["rows"], result["rows"])
+            ref = ref_costs[q["id"]] if correct else None
+            cost = measure(sql, args.repeats) if correct else None
             records.append({
                 "id": q["id"], "variant": i, "question": text, "tags": q["tags"], "sql": sql,
                 "correct": correct, "error": result.get("error"),
+                "ref_cost": ref, "query_cost": cost, **score(f1, ref, cost),
                 "rows": result.get("rows", [])[:5], "seconds": round(time.time() - t, 1),
             })
             mark = "ok " if correct else ("ERR" if "error" in result else "-- ")
-            print(f"{mark} {q['id']:24} v{i}  {result.get('error', '')[:80]}", flush=True)
+            detail = (f"work x{1 / records[-1]['work_ratio']:.2f} of ref, "
+                      f"{cost['seconds']:.3f}s vs {ref['seconds']:.3f}s"
+                      if correct and records[-1]["work_ratio"] else f"F1 {f1}")
+            print(f"{mark} {q['id']:24} v{i}  {records[-1]['points']:5.1f} pts  {detail}  "
+                  f"{result.get('error', '')[:60]}", flush=True)
 
     n = len(records)
     n_ok = sum(r["correct"] for r in records)
@@ -183,6 +281,7 @@ def cmd_run(args) -> None:
     print(f"all variants: {n_ok}/{n} = {n_ok / n:.0%}")
     print(f"canonical:    {sum(r['correct'] for r in canonical)}/{len(canonical)}")
     print(f"errors:       {sum(r['error'] is not None for r in records)}/{n}")
+    print_points(records)
     if args.out:
         with open(args.out, "w") as f:
             for r in records:
@@ -196,9 +295,11 @@ def cmd_agent(args) -> None:
     else:
         from agent import run
     answers = json.loads(ANSWERS_FILE.read_text())
+    questions = load_questions()
+    ref_costs = ReferenceCosts(questions, args.repeats)
 
     records = []
-    for q in load_questions():
+    for q in questions:
         for i, text in enumerate([q["question"], *q.get("paraphrases", [])]):
             t = time.time()
             try:
@@ -213,9 +314,30 @@ def cmd_agent(args) -> None:
                 for r in results
             )
             answer_ok = answer_has_reference(trace["answer"], answers[q["id"]]["rows"])
+            sql_seconds = sum(
+                r.get("elapsed_seconds", QUERY_TIMEOUT_SECONDS if "timeout" in r.get("error", "")
+                      else 0.0)
+                for r in results
+            )
+            ok_results = [r for r in results if "error" not in r]
+            if correct or answer_ok:
+                f1 = 1.0
+            else:
+                f1 = max((result_f1(answers[q["id"]]["rows"], r["rows"]) for r in ok_results),
+                         default=0.0)
+            timed_out = any("timeout" in r.get("error", "") for r in results)
+            ref = query = None
+            if f1 == 1.0 and not timed_out:
+                ref = ref_costs[q["id"]]
+                works = [query_ais_data(c["sql"], profile=True) for c in trace["tool_calls"]
+                         if "error" not in c["result"]]
+                query = {"work": sum(w.get("rows_scanned", 0) + w.get("cardinality", 0)
+                                     for w in works),
+                         "seconds": sql_seconds}
             records.append({
                 "id": q["id"], "variant": i, "question": text, "tags": q["tags"],
-                "correct": correct, "answer_ok": answer_ok,
+                "correct": correct, "answer_ok": answer_ok, "sql_seconds": round(sql_seconds, 3),
+                "ref_cost": ref, "query_cost": query, **score(f1, ref, query),
                 "answer": trace["answer"], "plan": trace.get("plan"),
                 "calls": [{"request": c.get("request"), "sql": c["sql"],
                            "error": c["result"].get("error")} for c in trace["tool_calls"]],
@@ -236,6 +358,7 @@ def cmd_agent(args) -> None:
               f"canonical {sum(r[key] for r in canonical)}/{len(canonical)}")
     either = sum(r["correct"] or r["answer_ok"] for r in records)
     print(f"either: {either}/{n}")
+    print_points(records)
     print(f"calls/question: {sum(len(r['calls']) for r in records) / n:.1f}, "
           f"seconds/question: {sum(r['seconds'] for r in records) / n:.0f}")
     if args.out:
@@ -253,10 +376,12 @@ def main() -> None:
     run.add_argument("--model", help="served model name (default: agent.MODEL_PATH)")
     run.add_argument("--base-url", help="OpenAI-compatible URL (default: current endpoint)")
     run.add_argument("--out", help="write per-question results as JSONL")
+    run.add_argument("--repeats", type=int, default=3, help="timed runs per query for points")
     run.set_defaults(func=cmd_run)
     agent = sub.add_parser("agent", help="score a whole agent end to end")
     agent.add_argument("--mode", choices=["planner", "single"], default="planner")
     agent.add_argument("--out", help="write per-question results as JSONL")
+    agent.add_argument("--repeats", type=int, default=3, help="timed runs of reference SQL")
     agent.set_defaults(func=cmd_agent)
     args = parser.parse_args()
     args.func(args)

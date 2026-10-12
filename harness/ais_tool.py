@@ -7,6 +7,7 @@ Data layout (produced by the ingestion pipeline, not this harness):
 Set P7_PROJECT_DIR to point at a different project root.
 """
 
+import json
 import os
 import re
 import threading
@@ -99,13 +100,22 @@ def connect() -> duckdb.DuckDBPyConnection:
     return con
 
 
-def query_ais_data(sql: str) -> dict:
+# Deterministic work counters (DuckDB profiling, kept in memory) for the eval's speed score.
+_PROFILE_METRICS = json.dumps({"CUMULATIVE_ROWS_SCANNED": "true", "CUMULATIVE_CARDINALITY": "true"})
+
+
+def query_ais_data(sql: str, profile: bool = False) -> dict:
+    """Run one read-only query with the guardrails. profile=True also returns rows_scanned
+    and cardinality (rows through all operators), which do not vary between runs."""
     try:
         safe_sql = _validate(sql)
     except QueryRejected as e:
         return {"error": str(e), "sql_attempted": sql}
 
     con = connect()
+    if profile:
+        con.execute("PRAGMA enable_profiling='no_output'")
+        con.execute(f"PRAGMA custom_profiling_settings='{_PROFILE_METRICS}'")
     result_holder = {}
     error_holder = {}
 
@@ -136,14 +146,19 @@ def query_ais_data(sql: str) -> dict:
 
     df = result_holder["df"]
     truncated = len(df) >= MAX_ROW_LIMIT
-    return {
+    result = {
         "columns": list(df.columns),
         "rows": df.astype(object).where(df.notnull(), None).values.tolist(),
         "row_count": len(df),
         "truncated": truncated,
-        "elapsed_seconds": round(time.time() - start, 2),
+        "elapsed_seconds": round(time.time() - start, 3),
         "sql_run": safe_sql,
     }
+    if profile:
+        info = json.loads(con.get_profiling_information(format="json"))
+        result["rows_scanned"] = info["cumulative_rows_scanned"]
+        result["cardinality"] = info["cumulative_cardinality"]
+    return result
 
 
 TOOL_SCHEMA = {

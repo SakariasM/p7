@@ -4,9 +4,11 @@ Text-to-SQL training data for the student model, with the served Qwen3-8B as tea
     cd harness
     python3 gen_sql_data.py templates --per-template 60   # -> OUT/templates.jsonl
     python3 gen_sql_data.py freeform --prompts 300         # -> OUT/freeform.jsonl
-    python3 gen_sql_data.py export                         # -> OUT/train.jsonl, OUT/val.jsonl
+    python3 gen_sql_data.py planner --per-template 60      # -> OUT/planner.jsonl
+    python3 gen_sql_data.py export [--export-dir DIR]      # -> DIR/train.jsonl, DIR/val.jsonl
 
-OUT is $P7_PROJECT_DIR/data/text2sql unless --out-dir is given (before the subcommand). On the cluster run it as a CPU job:
+OUT is $P7_PROJECT_DIR/data/text2sql unless --out-dir is given (before the subcommand).
+On the cluster run it as a CPU job:
 `sbatch slurm/gen_sql_data.slurm templates --per-template 60` from the repo root.
 
 templates: sql_templates.py fills each template with sampled real values; the SQL must run
@@ -17,10 +19,16 @@ ship type and number.
 freeform: the teacher writes questions around sampled values, then answers each with
 several SQL samples; a question is kept when enough samples give the same usable result.
 
-Both append, so a run can be resubmitted with another --seed. export deduplicates, drops
+planner: the questions the student really gets come from the planner (planner.py), so each
+template question goes to the real planner prompt and tool; when the planner sends exactly
+one ask_data request that keeps every specific and condition, the pair (that request,
+template SQL) is kept. Splits and drifted requests are counted, not kept.
+
+All three append, so a run can be resubmitted with another --seed. export deduplicates, drops
 anything touching the eval dates or repeating an eval question, splits train/val by SQL
 (rewrites of one query stay together), and writes chat-format JSONL with
-schema_context.md as the system prompt.
+schema_context.md as the system prompt. It reads OUT and writes to --export-dir (default
+OUT) and will not overwrite an existing train/val there without --overwrite.
 """
 
 import argparse
@@ -113,17 +121,19 @@ class Teacher:
             return self._client
 
     def chat(self, messages: list[dict], n: int = 1, temperature: float = 0.7) -> list[str]:
+        response = self.create(messages=messages, n=n, temperature=temperature)
+        return [c.message.content or "" for c in response.choices]
+
+    def create(self, **kwargs):
+        """chat.completions.create on the served model, thinking off."""
         for _ in range(60):
             try:
-                response = self._client_now().chat.completions.create(
+                return self._client_now().chat.completions.create(
                     model=self.model,
-                    messages=messages,
-                    n=n,
-                    temperature=temperature,
                     max_tokens=1024,
                     extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+                    **kwargs,
                 )
-                return [c.message.content or "" for c in response.choices]
             except (APIConnectionError, APITimeoutError, APIStatusError) as e:
                 if isinstance(e, APIStatusError) and e.status_code < 500:
                     raise
@@ -158,10 +168,10 @@ def append(path, records: list[dict]) -> None:
             f.write(json.dumps(r, ensure_ascii=False, default=str) + "\n")
 
 
-def cmd_templates(args) -> None:
+def make_instances(args) -> list:
+    """per_template instances of every template, shuffled, from values sampled with args.seed."""
     rng = random.Random(args.seed)
     sampler = Sampler(connect(), rng, args.days)
-    stats: Counter = Counter()
     instances = []
     for template in TEMPLATES:
         made = 0
@@ -177,7 +187,12 @@ def cmd_templates(args) -> None:
             made += 1
     rng.shuffle(instances)
     print(f"{len(instances)} instances from {len(TEMPLATES)} templates", flush=True)
+    return instances
 
+
+def cmd_templates(args) -> None:
+    instances = make_instances(args)
+    stats: Counter = Counter()
     teacher = Teacher(args.base_url, args.model)
 
     def work(inst):
@@ -185,7 +200,8 @@ def cmd_templates(args) -> None:
         if not usable(result):
             return inst, None, 0, []
         prompt = PARAPHRASE_PROMPT.format(question=inst.question, sql=inst.sql)
-        rewrites = parse_list(teacher.chat([{"role": "user", "content": prompt}], temperature=0.8)[0])
+        reply = teacher.chat([{"role": "user", "content": prompt}], temperature=0.8)[0]
+        rewrites = parse_list(reply)
         kept = [p for p in rewrites if inst.keeps_specifics(p) and not SQL_LEAK_RE.search(p)]
         return inst, result, len(rewrites), kept
 
@@ -290,14 +306,107 @@ def cmd_freeform(args) -> None:
     print(f"kept {n_kept}/{n_questions} questions; appended to {out}")
 
 
+# "How many ships" vs "which ship": a request must ask the same kind of thing as its question.
+COUNT_RE = re.compile(
+    r"\bhow many\b(?!\s+(kilomet|km\b|met|nautical|hours?\b|minutes?\b))|\bnumber of\b|"
+    r"\bcount\b",
+    re.IGNORECASE,
+)
+YEAR_RE = re.compile(r"\b20\d\d\b")
+SQL_YEAR_RE = re.compile(r"DATE '(\d{4})-")
+
+
+def request_drift(question: str, request: str, sql: str) -> str | None:
+    """Why a planner request no longer matches the template SQL, or None."""
+    if bool(COUNT_RE.search(question)) != bool(COUNT_RE.search(request)):
+        return "asks a different kind of answer"
+    if set(YEAR_RE.findall(request)) - set(SQL_YEAR_RE.findall(sql)):
+        return "year does not match the data"
+    return None
+
+
+def cmd_planner(args) -> None:
+    from planner import ASK_DATA_SCHEMA, PLANNER_PROMPT
+
+    instances = make_instances(args)
+    teacher = Teacher(args.base_url, args.model)
+
+    def planner_requests(question: str) -> list[str]:
+        """The ask_data requests of the planner's first tool-calling turn (one nudge)."""
+        messages = [{"role": "system", "content": PLANNER_PROMPT},
+                    {"role": "user", "content": question}]
+        for _ in range(2):
+            # No temperature: the served model's default, as planner.run uses it.
+            message = teacher.create(messages=messages, tools=[ASK_DATA_SCHEMA],
+                                     tool_choice="auto").choices[0].message
+            if message.tool_calls:
+                requests = []
+                for call in message.tool_calls:
+                    try:
+                        requests.append(json.loads(call.function.arguments).get("request", ""))
+                    except json.JSONDecodeError:
+                        requests.append("")
+                return requests
+            messages += [message.model_dump(exclude_none=True),
+                         {"role": "user", "content": "Call ask_data now for the next step."}]
+        return []
+
+    def work(inst):
+        result = run_sql(inst.sql)
+        if not usable(result):
+            return inst, "unusable", None
+        requests = planner_requests(inst.question)
+        if len(requests) != 1:
+            return inst, "no_call" if not requests else "split", None
+        request = requests[0].strip()
+        if (not inst.keeps_specifics(request) or SQL_LEAK_RE.search(request)
+                or request_drift(inst.question, request, inst.sql)):
+            return inst, "drifted", request
+        return inst, "kept", {
+            "question": request, "sql": inst.sql, "source": "planner", "family": inst.family,
+            "variant": 0, "planner_of": inst.question, "answer": result["rows"][:5],
+        }
+
+    out = args.out_dir / "planner.jsonl"
+    stats: Counter = Counter()
+    drifted = []
+    with ThreadPoolExecutor(args.workers) as pool:
+        futures = [pool.submit(work, inst) for inst in instances]
+        for done, future in enumerate(as_completed(futures), 1):
+            inst, outcome, payload = future.result()
+            stats[inst.family, outcome] += 1
+            if outcome == "kept":
+                append(out, [payload])
+            elif outcome == "drifted" and len(drifted) < 15:
+                drifted.append((inst.question, payload))
+            if done % 100 == 0:
+                print(f"{done}/{len(instances)} done", flush=True)
+
+    outcomes = ["kept", "drifted", "split", "no_call", "unusable"]
+    print(f"\n{'family':26} " + " ".join(f"{o:>8}" for o in outcomes))
+    for family in sorted({f for f, _ in stats}):
+        print(f"{family:26} " + " ".join(f"{stats[family, o]:8}" for o in outcomes))
+    print("total" + " " * 22 + " ".join(
+        f"{sum(v for (_, o), v in stats.items() if o == oc):8}" for oc in outcomes))
+    print("\nexamples of drifted requests (question -> planner request):")
+    for question, request in drifted:
+        print(f"  {question}\n    -> {request}")
+    print(f"appended to {out}")
+
+
 def cmd_export(args) -> None:
     context = CONTEXT_FILE.read_text()
     eval_texts = {
         " ".join(t.lower().split())
         for q in load_questions() for t in [q["question"], *q.get("paraphrases", [])]
     }
+    export_dir = args.export_dir or args.out_dir
+    targets = [export_dir / "train.jsonl", export_dir / "val.jsonl"]
+    if any(t.exists() for t in targets) and not args.overwrite:
+        sys.exit(f"{export_dir} already has train/val; pick another --export-dir or --overwrite")
+    export_dir.mkdir(parents=True, exist_ok=True)
     records = []
-    for name in ("templates.jsonl", "freeform.jsonl"):
+    for name in ("templates.jsonl", "freeform.jsonl", "planner.jsonl"):
         path = args.out_dir / name
         if path.exists():
             records += [json.loads(line) for line in path.open()]
@@ -316,7 +425,7 @@ def cmd_export(args) -> None:
 
     splits = {"train": [r for r in kept if not is_val(r)], "val": [r for r in kept if is_val(r)]}
     for split, rows in splits.items():
-        with (args.out_dir / f"{split}.jsonl").open("w") as f:
+        with (export_dir / f"{split}.jsonl").open("w") as f:
             for r in rows:
                 f.write(json.dumps({"messages": [
                     {"role": "system", "content": context},
@@ -326,16 +435,19 @@ def cmd_export(args) -> None:
 
     print(f"{len(records)} records, {len(kept)} after dedup/filters: "
           f"train {len(splits['train'])}, val {len(splits['val'])}")
+    for source, n in sorted(Counter(r["source"] for r in kept).items()):
+        print(f"  source {source:19} {n}")
     for family, n in sorted(Counter(r["family"] for r in kept).items()):
         print(f"  {family:26} {n}")
-    print(f"wrote {args.out_dir}/train.jsonl and val.jsonl")
+    print(f"wrote {export_dir}/train.jsonl and val.jsonl")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0].strip())
     parser.add_argument("--out-dir", type=Path, default=OUT_DIR)
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name, func in (("templates", cmd_templates), ("freeform", cmd_freeform)):
+    for name, func in (("templates", cmd_templates), ("freeform", cmd_freeform),
+                       ("planner", cmd_planner)):
         p = sub.add_parser(name)
         p.add_argument("--seed", type=int, default=0)
         p.add_argument("--days", type=int, default=120, help="distinct days to sample from")
@@ -344,12 +456,15 @@ def main() -> None:
         p.add_argument("--base-url", help="OpenAI-compatible URL (default: current endpoint)")
         p.set_defaults(func=func)
     sub.choices["templates"].add_argument("--per-template", type=int, default=60)
+    sub.choices["planner"].add_argument("--per-template", type=int, default=60)
     sub.choices["freeform"].add_argument("--prompts", type=int, default=300,
                                          help="teacher prompts, 5 questions each")
     sub.choices["freeform"].add_argument("--samples", type=int, default=4)
     sub.choices["freeform"].add_argument("--min-agree", type=int, default=3)
     export = sub.add_parser("export")
     export.add_argument("--val-pct", type=int, default=5)
+    export.add_argument("--export-dir", type=Path, help="where train/val go (default: --out-dir)")
+    export.add_argument("--overwrite", action="store_true", help="replace an existing train/val")
     export.set_defaults(func=cmd_export)
     args = parser.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
