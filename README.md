@@ -16,6 +16,23 @@ uv run ais serve    # API on http://127.0.0.1:8000, interactive docs at /docs
 `ais dev` streams each day's 600 MB zip straight into DuckDB and deletes it afterwards,
 so peak disk use stays around 2 GB. Re-running skips days that are already clean.
 
+## Full year on AI-LAB
+
+The project folder holds a year of DMA data (2025-10-01..2026-09-30) as typed Parquet in
+`/ceph/project/P7-Agent-Harness/data/processed/ais/date=YYYY-MM-DD/ais.parquet`.
+`ais clean-processed START END` cleans from there instead of downloading; on the dev days
+the output is identical to the CSV route. From the repo root on AI-LAB:
+
+```sh
+sbatch slurm/clean_processed.slurm                         # one array task per month, ~1 h each
+sbatch --dependency=afterok:<job id> slurm/derive.slurm    # trips and stops, then ais.duckdb
+AIS_DATA_DIR=/ceph/project/P7-Agent-Harness/data uv run ais serve --port 8200
+```
+
+Both jobs write to `$AIS_DATA_DIR` (default: the project's `data/`), logs go to its `logs/`.
+`derive` processes vessels in MMSI-range chunks of ~60M positions, so a year fits in memory;
+the result matches a single pass.
+
 ## API
 
 The contract is [`api/openapi.json`](api/openapi.json). Generate frontend types with:

@@ -1,7 +1,7 @@
 """Command line: `uv run ais --help`."""
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -16,6 +16,7 @@ from ais.paths import CLEAN_TABLES, DataPaths
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
 DEV_DAYS = (date(2026, 9, 22), date(2026, 9, 23), date(2026, 9, 24))
+PROCESSED_DIR = Path("/ceph/project/P7-Agent-Harness/data/processed/ais")
 OPENAPI_FILE = Path("api/openapi.json")
 
 Day = Annotated[datetime, typer.Argument(formats=["%Y-%m-%d"], help="YYYY-MM-DD")]
@@ -29,12 +30,16 @@ def _is_clean(paths: DataPaths, day: date) -> bool:
     return all((paths.partition(t, day) / "part.parquet").exists() for t in CLEAN_TABLES)
 
 
+def _clean(paths: DataPaths, source: Path, day: date) -> None:
+    typer.echo(f"{day}: cleaning")
+    for r in clean_day(source, day, paths):
+        typer.echo(f"  {r.name:<24} {r.action:<4} {r.rows_affected:>10,} of {r.rows_in:>11,}")
+
+
 def _process(paths: DataPaths, day: date, keep_raw: bool) -> None:
     typer.echo(f"{day}: fetching")
     raw = fetch_zip(day, paths.raw_zip(day))
-    typer.echo(f"{day}: cleaning")
-    for r in clean_day(raw, day, paths):
-        typer.echo(f"  {r.name:<24} {r.action:<4} {r.rows_affected:>10,} of {r.rows_in:>11,}")
+    _clean(paths, raw, day)
     if not keep_raw:
         raw.unlink()
 
@@ -72,10 +77,51 @@ def dev(
     derive()
 
 
+@app.command("clean-processed")
+def clean_processed(
+    start: Day,
+    end: Day,
+    processed_dir: Annotated[
+        Path,
+        typer.Option(
+            envvar="AIS_PROCESSED_DIR",
+            help="Folder with date=YYYY-MM-DD/ais.parquet, one per day",
+        ),
+    ] = PROCESSED_DIR,
+    force: Annotated[bool, typer.Option(help="Re-clean days that already exist")] = False,
+    build: Annotated[
+        bool, typer.Option(help="Rebuild ais.duckdb at the end; off for parallel jobs")
+    ] = True,
+) -> None:
+    """Clean every day in [start, end] from the processed Parquet on AI-LAB (no download).
+
+    Run `ais derive` afterwards to rebuild trips and stops."""
+    paths = _paths()
+    day, last = start.date(), end.date()
+    if last < day:
+        raise typer.BadParameter("end must not be before start")
+    missing: list[date] = []
+    while day <= last:
+        source = processed_dir / f"date={day.isoformat()}" / "ais.parquet"
+        if not source.exists():
+            typer.echo(f"{day}: no processed file, skipped")
+            missing.append(day)
+        elif _is_clean(paths, day) and not force:
+            typer.echo(f"{day}: already clean")
+        else:
+            _clean(paths, source, day)
+        day += timedelta(days=1)
+    if build:
+        build_duckdb()
+    if missing:
+        typer.echo(f"{len(missing)} day(s) had no processed file", err=True)
+        raise typer.Exit(1)
+
+
 @app.command()
 def derive() -> None:
     """Rebuild trips, stops and trip geometry (data/derived/) from all cleaned days."""
-    r = derive_all(_paths())
+    r = derive_all(_paths(), progress=typer.echo)
     typer.echo(
         f"{r.positions:,} positions -> {r.trips:,} trips, {r.stops:,} stops"
         f" (removed {r.outside_coverage} outside coverage, {r.outliers_removed} outliers,"
