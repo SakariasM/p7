@@ -11,15 +11,17 @@
 #
 # Serves one model with vLLM for the length of this job and scores it on the held-out
 # text-to-SQL questions with harness/eval_sql.py (needs envs/harness). Results go to
-# logs/eval/<model name>.jsonl.
+# logs/eval/<model name>_<job id>.jsonl unless --out is given.
 #
-# Usage, from the repo root:
+# Usage, from the repo root (arguments after MODEL_DIR go to eval_sql.py run):
 #     sbatch slurm/eval_student.slurm /ceph/project/P7-Agent-Harness/models/qwen2.5-coder-1.5b-sql-v1
+#     sbatch slurm/eval_student.slurm MODEL_DIR --dynamic-places --out .../x.jsonl
 
 set -euo pipefail
 trap 'echo "FAILED at line $LINENO (exit code $?)"' ERR
 
-MODEL_DIR="${1:?usage: sbatch slurm/eval_student.slurm MODEL_DIR}"
+MODEL_DIR="${1:?usage: sbatch slurm/eval_student.slurm MODEL_DIR [eval_sql.py run options]}"
+shift
 REPO_DIR="${REPO_DIR:-${SLURM_SUBMIT_DIR:-$PWD}}"
 export P7_PROJECT_DIR="${P7_PROJECT_DIR:-/ceph/project/P7-Agent-Harness}"
 CONTAINER="/ceph/container/pytorch/pytorch_25.12.sif"
@@ -60,6 +62,7 @@ echo "vLLM up"
 
 mkdir -p "$P7_PROJECT_DIR/logs/eval"
 cd "$REPO_DIR/harness"
+OUT_ARGS=(--out "$P7_PROJECT_DIR/logs/eval/${NAME}_${SLURM_JOB_ID:-local}.jsonl")
+[[ " $* " == *" --out "* ]] && OUT_ARGS=()
 "$P7_PROJECT_DIR/envs/harness/bin/python" -u eval_sql.py run \
-    --model "$MODEL_DIR" --base-url "http://localhost:${PORT}/v1" \
-    --out "$P7_PROJECT_DIR/logs/eval/${NAME}.jsonl"
+    --model "$MODEL_DIR" --base-url "http://localhost:${PORT}/v1" "${OUT_ARGS[@]}" "$@"

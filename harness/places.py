@@ -90,9 +90,13 @@ def mentioned(text: str, places: list[Place] | None = None) -> list[Place]:
     return found
 
 
+def coord(x: float) -> str:
+    """A box number as the student sees it: 2 decimals when exact (12.40), else 3."""
+    return f"{x:.2f}" if abs(x * 100 - round(x * 100)) < 1e-9 else f"{x:.3f}"
+
+
 def format_place(place: Place) -> str:
-    return f"  {place.name}: " + ", ".join(f"{x:.2f}" if abs(x * 100 - round(x * 100)) < 1e-9
-                                           else f"{x:.3f}" for x in place.box)
+    return f"  {place.name}: " + ", ".join(coord(x) for x in place.box)
 
 
 def with_places(context: str, places: list[Place]) -> str:

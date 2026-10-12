@@ -47,9 +47,9 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
 from agent import MODEL_PATH, get_base_url
 from ais_tool import PROJECT_DIR, connect, extract_sql
-from build_context import PLACES
 from eval_sql import CONTEXT_FILE, load_questions, results_match, run_sql
-from sql_templates import EXCLUDED_DATE_RE, TEMPLATES, Sampler, d_text, place_text
+import places as gazetteer
+from sql_templates import ALL_PLACES, EXCLUDED_DATE_RE, TEMPLATES, Sampler, d_text, place_text
 
 OUT_DIR = PROJECT_DIR / "data" / "text2sql"
 MAX_ANSWER_ROWS = 50
@@ -266,7 +266,7 @@ def cmd_freeform(args) -> None:
         prompts.append(QUESTION_PROMPT.format(
             d0=d_text(d0, rng), d1=d_text(d1, rng),
             v0=v0.name, t0=v0.ship_type, v1=v1.name, t1=v1.ship_type,
-            place=place_text(rng.choice(list(PLACES)))[0],
+            place=place_text(rng.choice(ALL_PLACES))[0],
             focus=rng.choice(FOCUS),
         ))
     print(f"{len(prompts)} prompts", flush=True)
@@ -326,29 +326,48 @@ def request_drift(question: str, request: str, sql: str) -> str | None:
 
 
 def cmd_planner(args) -> None:
-    from planner import ASK_DATA_SCHEMA, PLANNER_PROMPT
+    from planner import PLANNER_PROMPT, TOOLS, find_place
 
     instances = make_instances(args)
     teacher = Teacher(args.base_url, args.model)
 
     def planner_requests(question: str) -> list[str]:
-        """The ask_data requests of the planner's first tool-calling turn (one nudge)."""
+        """The ask_data requests of the planner's first data turn, with the production tools:
+        find_place calls are answered as planner.run does, until it calls ask_data."""
         messages = [{"role": "system", "content": PLANNER_PROMPT},
                     {"role": "user", "content": question}]
-        for _ in range(2):
+        nudged = False
+        for _ in range(5):
             # No temperature: the served model's default, as planner.run uses it.
-            message = teacher.create(messages=messages, tools=[ASK_DATA_SCHEMA],
+            message = teacher.create(messages=messages, tools=TOOLS,
                                      tool_choice="auto").choices[0].message
-            if message.tool_calls:
+            calls = message.tool_calls or []
+            asks = [c for c in calls if c.function.name == "ask_data"]
+            if asks:
                 requests = []
-                for call in message.tool_calls:
+                for call in asks:
                     try:
                         requests.append(json.loads(call.function.arguments).get("request", ""))
                     except json.JSONDecodeError:
                         requests.append("")
                 return requests
-            messages += [message.model_dump(exclude_none=True),
-                         {"role": "user", "content": "Call ask_data now for the next step."}]
+            messages.append(message.model_dump(exclude_none=True))
+            if not calls:
+                if nudged:
+                    return []
+                nudged = True
+                messages.append({"role": "user", "content": "Call ask_data now for the next step."})
+                continue
+            for call in calls:
+                try:
+                    arguments = json.loads(call.function.arguments)
+                except json.JSONDecodeError:
+                    arguments = {}
+                reply = (find_place(str(arguments.get("name", "")))
+                         if call.function.name == "find_place"
+                         else {"error": "not available while generating training data"})
+                messages.append({"role": "tool", "tool_call_id": call.id,
+                                 "content": json.dumps(reply)})
         return []
 
     def work(inst):
@@ -406,10 +425,27 @@ def cmd_export(args) -> None:
         sys.exit(f"{export_dir} already has train/val; pick another --export-dir or --overwrite")
     export_dir.mkdir(parents=True, exist_ok=True)
     records = []
-    for name in ("templates.jsonl", "freeform.jsonl", "planner.jsonl"):
-        path = args.out_dir / name
+    inputs = args.inputs or [args.out_dir / n
+                             for n in ("templates.jsonl", "freeform.jsonl", "planner.jsonl")]
+    for path in inputs:
         if path.exists():
             records += [json.loads(line) for line in path.open()]
+    known = [p for p in gazetteer.load() if p.source != "learned"]
+
+    def system_prompt(r: dict) -> str:
+        """Fixed context, or (--dynamic-places) the context with the places the example needs
+        (named in the question or whose box is in the SQL) plus 0-4 random others, shuffled,
+        as planner.ask_data builds it at run time."""
+        if not args.dynamic_places:
+            return context
+        rng = random.Random(hashlib.sha1(r["question"].encode()).hexdigest())
+        boxes = {tuple(round(x, 3) for x in b) for b in gazetteer.boxes_in_sql(r["sql"])}
+        needed = {p.name: p for p in gazetteer.mentioned(r["question"], known)}
+        needed |= {p.name: p for p in known if tuple(round(x, 3) for x in p.box) in boxes}
+        others = [p for p in known if p.name not in needed]
+        shown = list(needed.values()) + rng.sample(others, rng.randint(0, 4))
+        rng.shuffle(shown)
+        return gazetteer.with_places(context, shown)
 
     seen, kept = set(), []
     for r in records:
@@ -428,7 +464,7 @@ def cmd_export(args) -> None:
         with (export_dir / f"{split}.jsonl").open("w") as f:
             for r in rows:
                 f.write(json.dumps({"messages": [
-                    {"role": "system", "content": context},
+                    {"role": "system", "content": system_prompt(r)},
                     {"role": "user", "content": r["question"]},
                     {"role": "assistant", "content": r["sql"]},
                 ], "family": r["family"]}, ensure_ascii=False) + "\n")
@@ -465,6 +501,10 @@ def main() -> None:
     export.add_argument("--val-pct", type=int, default=5)
     export.add_argument("--export-dir", type=Path, help="where train/val go (default: --out-dir)")
     export.add_argument("--overwrite", action="store_true", help="replace an existing train/val")
+    export.add_argument("--inputs", type=Path, nargs="+",
+                        help="record files (default: templates/freeform/planner.jsonl in OUT)")
+    export.add_argument("--dynamic-places", action="store_true",
+                        help="per-example place list, as at run time (default: fixed context)")
     export.set_defaults(func=cmd_export)
     args = parser.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)

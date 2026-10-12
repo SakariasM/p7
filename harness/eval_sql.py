@@ -5,6 +5,7 @@ Text-to-SQL execution accuracy on the held-out questions in eval/questions.toml.
     python3 eval_sql.py answers                       # reference results -> eval/answers.json
     python3 eval_sql.py run                           # current vLLM model (Qwen3-8B)
     python3 eval_sql.py run --model NAME --base-url http://host:port/v1 --out results.jsonl
+    python3 eval_sql.py run --dynamic-places ...   # place list as at run time (planner.py)
     python3 eval_sql.py agent --mode planner --out planner.jsonl   # or --mode single
 
 `run` gives the model schema_context.md as the system prompt and each question (and each
@@ -49,6 +50,7 @@ try:
 except ModuleNotFoundError:  # Python < 3.11 on the login node
     import tomli as tomllib
 
+import places
 from ais_tool import QUERY_TIMEOUT_SECONDS, extract_sql, query_ais_data
 
 HERE = Path(__file__).parent
@@ -237,7 +239,7 @@ def cmd_run(args) -> None:
 
     client = OpenAI(base_url=args.base_url or get_base_url(), api_key="not-needed")
     model = args.model or MODEL_PATH
-    system = CONTEXT_FILE.read_text()
+    context = CONTEXT_FILE.read_text()
     answers = json.loads(ANSWERS_FILE.read_text())
 
     questions = load_questions()
@@ -246,6 +248,8 @@ def cmd_run(args) -> None:
     for q in questions:
         for i, text in enumerate([q["question"], *q.get("paraphrases", [])]):
             t = time.time()
+            system = (places.with_places(context, places.mentioned(text))
+                      if args.dynamic_places else context)
             response = client.chat.completions.create(
                 model=model,
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": text}],
@@ -377,6 +381,8 @@ def main() -> None:
     run.add_argument("--base-url", help="OpenAI-compatible URL (default: current endpoint)")
     run.add_argument("--out", help="write per-question results as JSONL")
     run.add_argument("--repeats", type=int, default=3, help="timed runs per query for points")
+    run.add_argument("--dynamic-places", action="store_true",
+                     help="only the places a question names in the prompt, as planner.py does")
     run.set_defaults(func=cmd_run)
     agent = sub.add_parser("agent", help="score a whole agent end to end")
     agent.add_argument("--mode", choices=["planner", "single"], default="planner")

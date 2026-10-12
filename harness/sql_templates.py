@@ -7,13 +7,14 @@ the conventions in schema_context.md. Dates in eval/questions.toml (plus a margi
 sampled, so no training pair repeats an eval instance.
 """
 
+import json
 import random
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
 from ais_tool import _DATES
-from build_context import PLACES
+import places as gazetteer
 
 EXCLUDED_DATES = {date(2026, 9, d) for d in range(20, 27)}  # eval window 22-24 Sep + margin
 EXCLUDED_DATE_RE = re.compile(r"2026-09-2[0-6]")
@@ -40,12 +41,14 @@ SHIP_TYPES = {
     "Towing": ("towing vessels", r"tow"),
 }
 COMMON_TYPES = ["Cargo", "Fishing", "Passenger", "Tanker", "Sailing", "Tug", "Pleasure", "Pilot"]
-# Big enough to usually contain vessels at any hour.
-BIG_PLACES = ["Øresund (the Sound)", "Kattegat", "Copenhagen", "Gothenburg", "Skagen"]
-PLACE_NAMES = {
-    "Øresund (the Sound)": ("the Øresund", r"[øoö]resund|the sound"),
-    "Helsingør": ("Helsingør", r"helsing[øo]r|elsinore"),
-}
+# Places from places.json (not the learned ones). Sea areas, the hand-made ports and ports
+# with at least 40 moored vessels in build_places' sample usually have vessels at any hour.
+_PLACES = {p.name: p for p in gazetteer.load() if p.source != "learned"}
+_MOORED = {p["name"]: p.get("evidence", {}).get("moored_vessels", 0)
+           for p in json.loads(gazetteer.PLACES_FILE.read_text())["places"]}
+ALL_PLACES = sorted(_PLACES)
+BIG_PLACES = sorted(n for n, p in _PLACES.items()
+                    if p.kind == "area" or p.source == "manual" or _MOORED.get(n, 0) >= 40)
 # Qualifiers a paraphrase tends to drop, which would change the answer.
 MOVING_MUST = r"underway|under way|moving|in motion|making way|\b1 (knot|kn)\b|at least 1"
 EVERY_DAY_MUST = r"every|each|all|both|consecutive|throughout"
@@ -101,13 +104,19 @@ def hhmm_must(hhmm: str) -> str:
 
 
 def place_text(name: str) -> tuple[str, str]:
-    return PLACE_NAMES.get(name, (name, re.escape(name.lower())))
+    """How a question names the place, and a pattern any of its spellings matches."""
+    place = _PLACES[name]
+    shown = f"the {name}" if place.kind == "area" else name
+    spellings = {name, *place.aliases, gazetteer.normalise(name)}
+    pattern = "|".join(re.escape(s) for s in sorted(spellings, key=len, reverse=True) if s)
+    return shown, pattern
 
 
 def box_sql(name: str, prefix: str = "") -> str:
-    lon0, lat0, lon1, lat1 = PLACES[name]
-    return (f"{prefix}lon BETWEEN {lon0:.2f} AND {lon1:.2f} "
-            f"AND {prefix}lat BETWEEN {lat0:.2f} AND {lat1:.2f}")
+    """The box exactly as the student's place list prints it (places.coord)."""
+    lon0, lat0, lon1, lat1 = (gazetteer.coord(x) for x in _PLACES[name].box)
+    return (f"{prefix}lon BETWEEN {lon0} AND {lon1} "
+            f"AND {prefix}lat BETWEEN {lat0} AND {lat1}")
 
 
 def num_must(n: int | float) -> str:
@@ -179,7 +188,7 @@ class Sampler:
         return self.rng.choice(COMMON_TYPES if common else list(SHIP_TYPES))
 
     def place(self, big: bool = True) -> str:
-        return self.rng.choice(BIG_PLACES if big else list(PLACES))
+        return self.rng.choice(BIG_PLACES if big else ALL_PLACES)
 
 
 # --- templates ---------------------------------------------------------------------------
