@@ -96,8 +96,21 @@ The planner never sees the schema or writes SQL. Each `ask_data` request must st
 trained; the planner does the arithmetic across requests and rephrases failed ones (an
 identical failed request is refused, since the student is deterministic).
 
+Places: the student's prompt lists only the places a request names, looked up in
+`harness/places.json` (hand-made sea areas plus ports located from AIS: where moored
+vessels that declare the port as destination lie). The planner checks names with
+`find_place`; for an unknown place it proposes a box with `propose_place`, which must lie in
+the coverage area, have a sensible size and contain vessels in the AIS data, and is then
+appended to `data/places_learned.jsonl` (project folder) as unverified. SQL whose lon/lat
+box belongs to no place in the request is not run. Rebuild the list with
+`python3 build_places.py /ceph/project/P7-Agent-Harness/data/external/un-locode/code-list.csv`
+(UN/LOCODE from github.com/datasets/un-locode); edit `places_manual.json` for fixed boxes.
+
 ```
 harness/           agent.py, planner.py, ais_tool.py, api.py (flat imports, run from here)
+                   places.py + places.json (named places; built by build_places.py from
+                   places_manual.json, UN/LOCODE and AIS, checked against
+                   places_reference_ports.json)
                    build_context.py -> schema_context.md, eval_sql.py + eval/ (text-to-SQL),
                    gen_sql_data.py + sql_templates.py (training data)
 slurm/             serve_llm.slurm (vLLM server), serve_student.slurm (SQL student server),

@@ -36,6 +36,7 @@ class AskResponse(BaseModel):
     answer: str
     plan: str | None = None
     tool_calls: list[dict]
+    place_calls: list[dict] = []
 
 
 @app.get("/health")

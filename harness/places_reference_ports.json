@@ -1,0 +1,205 @@
+{
+ "_note": "Danish port points supplied on 2026-10-12, origin unverified. Several un_locode values do not match UN/LOCODE (e.g. Frederikshavn is DKFDH, Nyborg DKNBG) and Aabenraa's longitude is inland, so build_places.py uses these only by name, as a fallback start point that still needs moored vessels in the AIS data, and as a cross-check. 'name' drops the 'Port of' prefix; 'listed_name' keeps the original.",
+ "ports": [
+  {
+   "name": "Aarhus",
+   "listed_name": "Port of Aarhus",
+   "un_locode": "DKAAR",
+   "latitude": 56.1564,
+   "longitude": 10.23,
+   "type": "Commercial / Container"
+  },
+  {
+   "name": "Copenhagen",
+   "listed_name": "Port of Copenhagen",
+   "un_locode": "DKCPH",
+   "latitude": 55.6718,
+   "longitude": 12.5817,
+   "type": "Commercial / Cruise"
+  },
+  {
+   "name": "Esbjerg",
+   "listed_name": "Port of Esbjerg",
+   "un_locode": "DKEBJ",
+   "latitude": 55.4624,
+   "longitude": 8.4418,
+   "type": "Commercial / Offshore Wind"
+  },
+  {
+   "name": "Fredericia",
+   "listed_name": "Port of Fredericia",
+   "un_locode": "DKFRC",
+   "latitude": 55.5642,
+   "longitude": 9.7561,
+   "type": "Commercial / Cargo"
+  },
+  {
+   "name": "Aalborg",
+   "listed_name": "Port of Aalborg",
+   "un_locode": "DKAAL",
+   "latitude": 57.0488,
+   "longitude": 9.9217,
+   "type": "Commercial / Industrial"
+  },
+  {
+   "name": "Odense",
+   "listed_name": "Port of Odense",
+   "un_locode": "DKODE",
+   "latitude": 55.4038,
+   "longitude": 10.3883,
+   "type": "Commercial / Industrial"
+  },
+  {
+   "name": "Skagen",
+   "listed_name": "Port of Skagen",
+   "un_locode": "DKSKA",
+   "latitude": 57.7222,
+   "longitude": 10.5878,
+   "type": "Fishing / Commercial"
+  },
+  {
+   "name": "Rønne",
+   "listed_name": "Port of Rønne",
+   "un_locode": "DKRNN",
+   "latitude": 55.1009,
+   "longitude": 14.6936,
+   "type": "Commercial / Ferry"
+  },
+  {
+   "name": "Frederikshavn",
+   "listed_name": "Port of Frederikshavn",
+   "un_locode": "DKFRH",
+   "latitude": 57.4397,
+   "longitude": 10.5369,
+   "type": "Commercial / Ferry / Fishing"
+  },
+  {
+   "name": "Hanstholm",
+   "listed_name": "Port of Hanstholm",
+   "un_locode": "DKHAN",
+   "latitude": 57.1189,
+   "longitude": 8.6186,
+   "type": "Fishing / Commercial"
+  },
+  {
+   "name": "Kalundborg",
+   "listed_name": "Port of Kalundborg",
+   "un_locode": "DKKAl",
+   "latitude": 55.6791,
+   "longitude": 11.0844,
+   "type": "Commercial / Industrial"
+  },
+  {
+   "name": "Grenaa",
+   "listed_name": "Port of Grenaa",
+   "un_locode": "DKGRE",
+   "latitude": 56.4111,
+   "longitude": 10.9234,
+   "type": "Commercial / Industrial / Ferry"
+  },
+  {
+   "name": "Hirtshals",
+   "listed_name": "Port of Hirtshals",
+   "un_locode": "DKHIR",
+   "latitude": 57.5921,
+   "longitude": 9.961,
+   "type": "Ferry / Fishing"
+  },
+  {
+   "name": "Kolding",
+   "listed_name": "Port of Kolding",
+   "un_locode": "DKKOL",
+   "latitude": 55.4912,
+   "longitude": 9.4936,
+   "type": "Commercial / Cargo"
+  },
+  {
+   "name": "Vejle",
+   "listed_name": "Port of Vejle",
+   "un_locode": "DKVEJ",
+   "latitude": 55.7061,
+   "longitude": 9.5593,
+   "type": "Commercial / Cargo"
+  },
+  {
+   "name": "Randers",
+   "listed_name": "Port of Randers",
+   "un_locode": "DKRAN",
+   "latitude": 56.4601,
+   "longitude": 10.0436,
+   "type": "Commercial / Cargo"
+  },
+  {
+   "name": "Køge",
+   "listed_name": "Port of Køge",
+   "un_locode": "DKKOG",
+   "latitude": 55.4542,
+   "longitude": 12.1932,
+   "type": "Commercial / Cargo"
+  },
+  {
+   "name": "Nyborg",
+   "listed_name": "Port of Nyborg",
+   "un_locode": "DKNYB",
+   "latitude": 55.3045,
+   "longitude": 10.7963,
+   "type": "Commercial / Industrial"
+  },
+  {
+   "name": "Horsens",
+   "listed_name": "Port of Horsens",
+   "un_locode": "DKHOR",
+   "latitude": 55.8592,
+   "longitude": 9.8661,
+   "type": "Commercial / Cargo"
+  },
+  {
+   "name": "Thyborøn",
+   "listed_name": "Port of Thyborøn",
+   "un_locode": "DKTHY",
+   "latitude": 56.6974,
+   "longitude": 8.2132,
+   "type": "Fishing / Industrial"
+  },
+  {
+   "name": "Nakskov",
+   "listed_name": "Port of Nakskov",
+   "un_locode": "DKNAK",
+   "latitude": 54.8333,
+   "longitude": 11.15,
+   "type": "Commercial / Cargo"
+  },
+  {
+   "name": "Åbenrå",
+   "listed_name": "Port of Åbenrå",
+   "un_locode": "DKAAB",
+   "latitude": 55.02,
+   "longitude": 9.26,
+   "type": "Commercial / Cargo"
+  },
+  {
+   "name": "Sønderborg",
+   "listed_name": "Port of Sønderborg",
+   "un_locode": "DKSGD",
+   "latitude": 54.9122,
+   "longitude": 9.7825,
+   "type": "Commercial / Marina"
+  },
+  {
+   "name": "Helsingør",
+   "listed_name": "Port of Helsingør",
+   "un_locode": "DKHEL",
+   "latitude": 56.0351,
+   "longitude": 12.6136,
+   "type": "Ferry / Marina"
+  },
+  {
+   "name": "Gedser",
+   "listed_name": "Port of Gedser",
+   "un_locode": "DKGED",
+   "latitude": 54.5744,
+   "longitude": 11.9281,
+   "type": "Ferry Port"
+  }
+ ]
+}

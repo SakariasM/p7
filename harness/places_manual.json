@@ -1,0 +1,27 @@
+{
+ "_note": "Hand-made places for build_places.py. Boxes are [lon_min, lat_min, lon_max, lat_max]. The first ten are the Phase 3 boxes and must not change (eval reference SQL uses them). Sea-area boxes are drawn by hand and approximate; review before relying on them.",
+ "places": [
+  {"name": "Øresund", "aliases": ["Oresund", "Öresund", "the Sound", "Øresund (the Sound)"], "kind": "area", "box": [12.40, 55.50, 12.95, 56.15]},
+  {"name": "Kattegat", "aliases": [], "kind": "area", "box": [10.50, 56.00, 12.50, 57.60]},
+  {"name": "Copenhagen", "aliases": ["København", "Kobenhavn", "Copenhagen port"], "kind": "port", "box": [12.53, 55.64, 12.66, 55.73]},
+  {"name": "Aarhus", "aliases": ["Århus", "Arhus"], "kind": "port", "box": [10.20, 56.13, 10.27, 56.17]},
+  {"name": "Esbjerg", "aliases": [], "kind": "port", "box": [8.40, 55.44, 8.47, 55.49]},
+  {"name": "Frederikshavn", "aliases": [], "kind": "port", "box": [10.52, 57.42, 10.60, 57.45]},
+  {"name": "Skagen", "aliases": ["Skaw"], "kind": "port", "box": [10.55, 57.70, 10.65, 57.74]},
+  {"name": "Gothenburg", "aliases": ["Göteborg", "Goteborg"], "kind": "port", "box": [11.60, 57.63, 11.98, 57.73]},
+  {"name": "Helsingør", "aliases": ["Helsingor", "Elsinore"], "kind": "port", "box": [12.60, 56.03, 12.63, 56.05]},
+  {"name": "Helsingborg", "aliases": ["Hälsingborg"], "kind": "port", "box": [12.68, 56.03, 12.71, 56.06]},
+
+  {"name": "Skagerrak", "aliases": [], "kind": "area", "box": [8.00, 57.30, 10.60, 59.00]},
+  {"name": "Great Belt", "aliases": ["Storebælt", "Storebaelt"], "kind": "area", "box": [10.70, 54.90, 11.30, 55.80]},
+  {"name": "Little Belt", "aliases": ["Lillebælt", "Lillebaelt"], "kind": "area", "box": [9.55, 54.90, 10.05, 55.65]},
+  {"name": "Fehmarn Belt", "aliases": ["Femern Bælt", "Fehmarnbelt"], "kind": "area", "box": [10.95, 54.40, 11.60, 54.70]},
+  {"name": "Limfjord", "aliases": ["Limfjorden"], "kind": "area", "box": [8.20, 56.40, 10.40, 57.10]},
+  {"name": "Kiel Bay", "aliases": ["Kieler Bucht"], "kind": "area", "box": [10.10, 54.30, 11.00, 54.70]},
+  {"name": "Bornholm waters", "aliases": ["around Bornholm"], "kind": "area", "box": [14.50, 54.85, 15.40, 55.45]},
+  {"name": "Smålandsfarvandet", "aliases": ["Smalandsfarvandet"], "kind": "area", "box": [11.20, 54.90, 12.00, 55.30]},
+  {"name": "Isefjord", "aliases": [], "kind": "area", "box": [11.65, 55.70, 11.95, 55.98]},
+  {"name": "Arkona Basin", "aliases": ["western Baltic Sea"], "kind": "area", "box": [12.50, 54.50, 14.50, 55.30]},
+  {"name": "Danish North Sea", "aliases": ["North Sea (Danish waters)"], "kind": "area", "box": [4.00, 55.00, 8.50, 57.50]}
+ ]
+}
