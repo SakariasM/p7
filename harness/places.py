@@ -52,14 +52,24 @@ def normalise(text: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9]+", " ", t).split())
 
 
-def load() -> list[Place]:
+def load(include_learned: bool = True) -> list[Place]:
+    """places.json, plus the learned places unless include_learned=False. Templates, data
+    generation and eval use only places.json, so their results do not drift as the planner
+    learns places at run time."""
     places = [
         Place(p["name"], tuple(p["box"]), p["kind"], p.get("aliases", []), p["source"])
         for p in json.loads(PLACES_FILE.read_text())["places"]
     ]
-    if LEARNED_FILE.exists():
-        for line in LEARNED_FILE.read_text().splitlines():
-            p = json.loads(line)
+    if include_learned and LEARNED_FILE.exists():
+        with LEARNED_FILE.open() as f:
+            fcntl.flock(f, fcntl.LOCK_SH)
+            lines = f.read().splitlines()
+            fcntl.flock(f, fcntl.LOCK_UN)
+        for line in lines:
+            try:
+                p = json.loads(line)
+            except json.JSONDecodeError:  # a line being written right now
+                continue
             places.append(Place(p["name"], tuple(p["box"]), p["kind"], [], "learned",
                                 p.get("status", "unverified")))
     return places

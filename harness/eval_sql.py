@@ -240,6 +240,7 @@ def cmd_run(args) -> None:
     client = OpenAI(base_url=args.base_url or get_base_url(), api_key="not-needed")
     model = args.model or MODEL_PATH
     context = CONTEXT_FILE.read_text()
+    known = places.load(include_learned=False)  # eval must not drift with learned places
     answers = json.loads(ANSWERS_FILE.read_text())
 
     questions = load_questions()
@@ -248,7 +249,7 @@ def cmd_run(args) -> None:
     for q in questions:
         for i, text in enumerate([q["question"], *q.get("paraphrases", [])]):
             t = time.time()
-            system = (places.with_places(context, places.mentioned(text))
+            system = (places.with_places(context, places.mentioned(text, known))
                       if args.dynamic_places else context)
             response = client.chat.completions.create(
                 model=model,

@@ -41,14 +41,20 @@ SHIP_TYPES = {
     "Towing": ("towing vessels", r"tow"),
 }
 COMMON_TYPES = ["Cargo", "Fishing", "Passenger", "Tanker", "Sailing", "Tug", "Pleasure", "Pilot"]
-# Places from places.json (not the learned ones). Sea areas, the hand-made ports and ports
-# with at least 40 moored vessels in build_places' sample usually have vessels at any hour.
-_PLACES = {p.name: p for p in gazetteer.load() if p.source != "learned"}
-_MOORED = {p["name"]: p.get("evidence", {}).get("moored_vessels", 0)
-           for p in json.loads(gazetteer.PLACES_FILE.read_text())["places"]}
+# Places from places.json only (never the learned ones). Hour-level templates use sea areas
+# and ports with at least 40 moored vessels in build_places' sample and a box of at least
+# BIG_MIN_SIDE_DEG a side; smaller places are often empty for an hour.
+_RAW = json.loads(gazetteer.PLACES_FILE.read_text())["places"]
+_PLACES = {p.name: p for p in gazetteer.load(include_learned=False)}
+_MOORED = {p["name"]: p.get("evidence", {}).get("moored_vessels", 0) for p in _RAW}
+BIG_MIN_SIDE_DEG = 0.02
 ALL_PLACES = sorted(_PLACES)
-BIG_PLACES = sorted(n for n, p in _PLACES.items()
-                    if p.kind == "area" or p.source == "manual" or _MOORED.get(n, 0) >= 40)
+BIG_PLACES = sorted(
+    n for n, p in _PLACES.items()
+    if p.kind == "area"
+    or (min(p.box[2] - p.box[0], p.box[3] - p.box[1]) >= BIG_MIN_SIDE_DEG
+        and (p.source == "manual" or _MOORED.get(n, 0) >= 40))
+)
 # Qualifiers a paraphrase tends to drop, which would change the answer.
 MOVING_MUST = r"underway|under way|moving|in motion|making way|\b1 (knot|kn)\b|at least 1"
 EVERY_DAY_MUST = r"every|each|all|both|consecutive|throughout"
@@ -108,8 +114,8 @@ def place_text(name: str) -> tuple[str, str]:
     place = _PLACES[name]
     shown = f"the {name}" if place.kind == "area" else name
     spellings = {name, *place.aliases, gazetteer.normalise(name)}
-    pattern = "|".join(re.escape(s) for s in sorted(spellings, key=len, reverse=True) if s)
-    return shown, pattern
+    alternatives = "|".join(re.escape(s) for s in sorted(spellings, key=len, reverse=True) if s)
+    return shown, rf"(?<!\w)(?:{alternatives})(?!\w)"  # whole words: Fur, not "further"
 
 
 def box_sql(name: str, prefix: str = "") -> str:

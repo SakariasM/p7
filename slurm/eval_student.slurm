@@ -63,6 +63,8 @@ echo "vLLM up"
 mkdir -p "$P7_PROJECT_DIR/logs/eval"
 cd "$REPO_DIR/harness"
 OUT_ARGS=(--out "$P7_PROJECT_DIR/logs/eval/${NAME}_${SLURM_JOB_ID:-local}.jsonl")
-[[ " $* " == *" --out "* ]] && OUT_ARGS=()
+for a in "$@"; do
+    if [[ "$a" == --out || "$a" == --out=* ]]; then OUT_ARGS=(); fi
+done
 "$P7_PROJECT_DIR/envs/harness/bin/python" -u eval_sql.py run \
     --model "$MODEL_DIR" --base-url "http://localhost:${PORT}/v1" "${OUT_ARGS[@]}" "$@"

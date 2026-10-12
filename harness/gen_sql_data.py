@@ -255,31 +255,37 @@ def cmd_freeform(args) -> None:
     rng = random.Random(args.seed)
     sampler = Sampler(connect(), rng, args.days)
     context = CONTEXT_FILE.read_text()
-    question_system = QUESTION_SYSTEM + context.split("\n\n", 1)[1]
+    known = gazetteer.load(include_learned=False)
 
+    # The teacher only sees the places in play: the sampled one when writing questions, the
+    # ones each question names when writing SQL (as the student will at run time).
     prompts = []
     while len(prompts) < args.prompts:
         d0, d1 = sampler.day(), sampler.day()
         v0, v1 = sampler.seed(d0), sampler.seed(d0)
         if v0 is None or v1 is None or v0.mmsi == v1.mmsi:
             continue
-        prompts.append(QUESTION_PROMPT.format(
+        place = gazetteer.find(rng.choice(ALL_PLACES), known)
+        system = QUESTION_SYSTEM + gazetteer.with_places(context, [place]).split("\n\n", 1)[1]
+        prompts.append((system, QUESTION_PROMPT.format(
             d0=d_text(d0, rng), d1=d_text(d1, rng),
             v0=v0.name, t0=v0.ship_type, v1=v1.name, t1=v1.ship_type,
-            place=place_text(rng.choice(ALL_PLACES))[0],
+            place=place_text(place.name)[0],
             focus=rng.choice(FOCUS),
-        ))
+        )))
     print(f"{len(prompts)} prompts", flush=True)
 
     teacher = Teacher(args.base_url, args.model)
 
     def work(prompt):
-        reply = teacher.chat([{"role": "system", "content": question_system},
-                              {"role": "user", "content": prompt}], temperature=0.9)[0]
+        system, text = prompt
+        reply = teacher.chat([{"role": "system", "content": system},
+                              {"role": "user", "content": text}], temperature=0.9)[0]
         records, n_questions = [], 0
         for question in parse_list(reply)[:5]:
             n_questions += 1
-            samples = teacher.chat([{"role": "system", "content": context},
+            sql_system = gazetteer.with_places(context, gazetteer.mentioned(question, known))
+            samples = teacher.chat([{"role": "system", "content": sql_system},
                                     {"role": "user", "content": question}],
                                    n=args.samples, temperature=0.7)
             sqls = [extract_sql(s) for s in samples]
@@ -326,7 +332,16 @@ def request_drift(question: str, request: str, sql: str) -> str | None:
 
 
 def cmd_planner(args) -> None:
-    from planner import PLANNER_PROMPT, TOOLS, find_place
+    from planner import PLANNER_PROMPT, TOOLS
+
+    known = gazetteer.load(include_learned=False)
+
+    def find_place(name: str) -> dict:
+        """planner.find_place on places.json only (no learned places in training data)."""
+        place = gazetteer.find(name, known)
+        if place is None:
+            return {"unknown": name, "next": "call propose_place with your best estimate"}
+        return place.as_dict()
 
     instances = make_instances(args)
     teacher = Teacher(args.base_url, args.model)
@@ -353,7 +368,8 @@ def cmd_planner(args) -> None:
                 return requests
             messages.append(message.model_dump(exclude_none=True))
             if not calls:
-                if nudged:
+                # Same rule as planner.run: nudge only when it announced a step.
+                if nudged or "ask_data" not in (message.content or ""):
                     return []
                 nudged = True
                 messages.append({"role": "user", "content": "Call ask_data now for the next step."})
@@ -430,27 +446,38 @@ def cmd_export(args) -> None:
     for path in inputs:
         if path.exists():
             records += [json.loads(line) for line in path.open()]
-    known = [p for p in gazetteer.load() if p.source != "learned"]
+    known = gazetteer.load(include_learned=False)
+    fixed = gazetteer.mentioned(context.partition(gazetteer.PLACES_HEADER)[2], known)
+
+    def places_ok(r: dict) -> bool:
+        """Every lon/lat box in the SQL belongs to a place the question names (or, with the
+        fixed context, to one of its listed places), so the prompt can show it."""
+        named = gazetteer.mentioned(r["question"], known)
+        if not args.dynamic_places:
+            named = named + fixed
+        return not gazetteer.unexplained_boxes(r["sql"], named, r["question"])
 
     def system_prompt(r: dict) -> str:
-        """Fixed context, or (--dynamic-places) the context with the places the example needs
-        (named in the question or whose box is in the SQL) plus 0-4 random others, shuffled,
-        as planner.ask_data builds it at run time."""
+        """Fixed context, or (--dynamic-places) the context listing the places the question
+        names, as planner.ask_data does at run time, plus 0-4 random other places as
+        distractors (not added at run time; they teach the student to pick the right box
+        from a list), in random order."""
         if not args.dynamic_places:
             return context
         rng = random.Random(hashlib.sha1(r["question"].encode()).hexdigest())
-        boxes = {tuple(round(x, 3) for x in b) for b in gazetteer.boxes_in_sql(r["sql"])}
-        needed = {p.name: p for p in gazetteer.mentioned(r["question"], known)}
-        needed |= {p.name: p for p in known if tuple(round(x, 3) for x in p.box) in boxes}
-        others = [p for p in known if p.name not in needed]
-        shown = list(needed.values()) + rng.sample(others, rng.randint(0, 4))
+        named = gazetteer.mentioned(r["question"], known)
+        others = [p for p in known if p not in named]
+        shown = named + rng.sample(others, rng.randint(0, 4))
         rng.shuffle(shown)
         return gazetteer.with_places(context, shown)
 
-    seen, kept = set(), []
+    seen, kept, no_place = set(), [], 0
     for r in records:
         key = " ".join(r["question"].lower().split())
         if key in seen or key in eval_texts or EXCLUDED_DATE_RE.search(r["sql"]):
+            continue
+        if not places_ok(r):  # e.g. a rewrite that lost its place name
+            no_place += 1
             continue
         seen.add(key)
         kept.append(r)
@@ -469,7 +496,8 @@ def cmd_export(args) -> None:
                     {"role": "assistant", "content": r["sql"]},
                 ], "family": r["family"]}, ensure_ascii=False) + "\n")
 
-    print(f"{len(records)} records, {len(kept)} after dedup/filters: "
+    print(f"{len(records)} records, {len(kept)} after dedup/filters "
+          f"({no_place} dropped: SQL box not named in the question): "
           f"train {len(splits['train'])}, val {len(splits['val'])}")
     for source, n in sorted(Counter(r["source"] for r in kept).items()):
         print(f"  source {source:19} {n}")
