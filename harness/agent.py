@@ -9,6 +9,7 @@ CLI usage:
 
 import json
 import sys
+from pathlib import Path
 
 from openai import OpenAI
 
@@ -25,6 +26,10 @@ SYSTEM_PROMPT = (
     "column when you know the date range, to keep queries fast. After you get "
     "tool results, give a concise, direct answer to the user's question."
 )
+# Same schema, rules and places as the SQL student gets (minus its "reply with SQL only"
+# line), so single mode is a like-for-like baseline for planner.py.
+_SCHEMA_CONTEXT = Path(__file__).with_name("schema_context.md").read_text()
+SYSTEM_PROMPT += "\n\n" + _SCHEMA_CONTEXT.split("\n\n", 1)[1]
 
 
 def get_base_url() -> str:

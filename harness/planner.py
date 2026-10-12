@@ -37,10 +37,18 @@ SQL it ran and the rows, or an error.
 
 How to work:
 1. Start with "Plan:" and a short numbered list of the data you need.
-2. Call ask_data for each step. Every request must stand on its own:
+2. Call ask_data for each step (call the tool; do not just announce it). Every request
+   must stand on its own:
    - one question that one query can answer, e.g. "How many tankers were in the Kattegat
      between 08:00 and 09:00 UTC on 3 March 2026?"
-   - full dates with day, month and year; times in UTC
+   - keep the user's form: "which ships" asks for the ships, not a count; how busy or how
+     many ships means distinct vessels, not reports
+   - ask for the answer itself (e.g. "Which hour had the most vessels ...?") rather than a
+     table to pick from
+   - do not split a question whose parts cannot be combined afterwards, e.g. vessels seen
+     on all of several days, top N over a period, the closest pair; send it as one request
+   - full dates with day, month and year (a date without a year is in the data range
+     above); times in UTC
    - places by name from this list, or as a lon/lat box: {", ".join(PLACES)}
    - vessel names in capitals as broadcast (e.g. TYCHO BRAHE); ship types such as Cargo,
      Fishing, Passenger, Tanker, Sailing, Tug, Pleasure, Pilot, HSC, SAR, Military
@@ -126,6 +134,7 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
     plan = None
     steps = []
     failed = set()  # requests that already failed; the student is deterministic
+    nudges = 0
 
     for _ in range(max_turns):
         response = planner.chat.completions.create(
@@ -139,6 +148,12 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
         messages.append(message.model_dump(exclude_none=True))
         if plan is None and strip_thinking(message.content):
             plan = strip_thinking(message.content)
+
+        if not message.tool_calls and "ask_data" in (message.content or "") and nudges < 2:
+            # Announced a step instead of calling the tool.
+            nudges += 1
+            messages.append({"role": "user", "content": "Call ask_data now for the next step."})
+            continue
 
         if not message.tool_calls:
             answer = strip_thinking(message.content)

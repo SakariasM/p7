@@ -14,14 +14,17 @@ A prediction counts as correct when, for some choice of its columns, it has the 
 as the reference (any row order, extra columns allowed, numbers within rounding).
 
 `agent` runs a whole agent (planner.py, or the single-model agent.py) on each question and
-counts it as answered when any query the agent ran returned the reference rows. That checks
-the data the agent fetched, not its written answer; the answers are in the JSONL to review.
+counts it as answered when any query the agent ran returned the reference rows ("data").
+Agents often fetch a broader table and pick the answer themselves, so it also checks whether
+every reference value appears in the final answer text ("answer": numbers within ~1%,
+strings case-insensitive, at most 10 reference rows). Answers are in the JSONL to review.
 """
 
 import argparse
 import itertools
 import json
 import math
+import re
 import sys
 import time
 from pathlib import Path
@@ -103,6 +106,26 @@ def results_match(ref_rows: list[list], pred_rows: list[list]) -> bool:
     return False
 
 
+_NUMBER_RE = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
+
+
+def answer_has_reference(answer: str, ref_rows: list[list]) -> bool:
+    """Every reference value appears in the answer text (heuristic, see the module doc)."""
+    if not answer or not ref_rows or len(ref_rows) > 10:
+        return False
+    numbers = [float(n.replace(",", "")) for n in _NUMBER_RE.findall(answer)]
+    text = answer.lower()
+    for value in (v for row in ref_rows for v in row):
+        if value is None or isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            if not any(math.isclose(value, n, rel_tol=1e-2, abs_tol=1e-2) for n in numbers):
+                return False
+        elif str(value).strip().lower() not in text:
+            return False
+    return True
+
+
 def cmd_answers(_args) -> None:
     answers = {}
     for q in load_questions():
@@ -182,28 +205,37 @@ def cmd_agent(args) -> None:
                 trace = run(text, return_trace=True)
             except Exception as e:  # endpoint down, context too long, ...
                 trace = {"answer": f"agent error: {e}", "tool_calls": []}
-            results = [json.loads(json.dumps(c["result"], default=str)) for c in trace["tool_calls"]]
+            results = [
+                json.loads(json.dumps(c["result"], default=str)) for c in trace["tool_calls"]
+            ]
             correct = any(
                 "error" not in r and results_match(answers[q["id"]]["rows"], r["rows"])
                 for r in results
             )
+            answer_ok = answer_has_reference(trace["answer"], answers[q["id"]]["rows"])
             records.append({
                 "id": q["id"], "variant": i, "question": text, "tags": q["tags"],
-                "correct": correct, "answer": trace["answer"], "plan": trace.get("plan"),
+                "correct": correct, "answer_ok": answer_ok,
+                "answer": trace["answer"], "plan": trace.get("plan"),
                 "calls": [{"request": c.get("request"), "sql": c["sql"],
                            "error": c["result"].get("error")} for c in trace["tool_calls"]],
                 "seconds": round(time.time() - t, 1),
             })
             n_err = sum(c["error"] is not None for c in records[-1]["calls"])
-            print(f"{'ok ' if correct else '-- '} {q['id']:24} v{i}  "
+            print(f"data {'ok' if correct else '--'}  answer {'ok' if answer_ok else '--'}  "
+                  f"{q['id']:24} v{i}  "
                   f"{len(results)} calls, {n_err} errors, {records[-1]['seconds']}s", flush=True)
 
     n = len(records)
-    n_ok = sum(r["correct"] for r in records)
     canonical = [r for r in records if r["variant"] == 0]
     print(f"\nagent {args.mode}")
-    print(f"all variants: {n_ok}/{n} = {n_ok / n:.0%}")
-    print(f"canonical:    {sum(r['correct'] for r in canonical)}/{len(canonical)}")
+    for key in ("correct", "answer_ok"):
+        label = "data  " if key == "correct" else "answer"
+        n_ok = sum(r[key] for r in records)
+        print(f"{label}: all {n_ok}/{n} = {n_ok / n:.0%}, "
+              f"canonical {sum(r[key] for r in canonical)}/{len(canonical)}")
+    either = sum(r["correct"] or r["answer_ok"] for r in records)
+    print(f"either: {either}/{n}")
     print(f"calls/question: {sum(len(r['calls']) for r in records) / n:.1f}, "
           f"seconds/question: {sum(r['seconds'] for r in records) / n:.0f}")
     if args.out:

@@ -81,10 +81,13 @@ def _validate(sql: str) -> str:
 
 
 def extract_sql(text: str) -> str:
-    """The SQL in a model reply: drops <think> blocks, takes the last fenced block if any."""
+    """The SQL in a model reply: drops <think> blocks, takes the last fenced block if any, and
+    removes full-line -- comments and the trailing ';' (models add notes after the query)."""
     text = re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL)
     fenced = re.findall(r"```(?:sql)?\s*(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
-    return (fenced[-1] if fenced else text).strip()
+    sql = fenced[-1] if fenced else text
+    lines = [line for line in sql.splitlines() if not line.strip().startswith("--")]
+    return "\n".join(lines).strip().rstrip(";").strip()
 
 
 def connect() -> duckdb.DuckDBPyConnection:
