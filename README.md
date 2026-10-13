@@ -84,20 +84,66 @@ so peak disk use stays around 2 GB. Re-running skips days that are already clean
 
 ## Full year on AI-LAB
 
-The project folder holds a year of DMA data (2025-10-01..2026-09-30) as typed Parquet in
-`/ceph/project/P7-Agent-Harness/data/processed/ais/date=YYYY-MM-DD/ais.parquet`.
-`ais clean-processed START END` cleans from there instead of downloading; on the dev days
-the output is identical to the CSV route. From the repo root on AI-LAB:
+The year is already processed and the API is already serving it, so to *use* the data you
+only need the tunnel (see the start of this README). Rebuild only when the input data or the
+cleaning/trip rules change, and tell the team first: everyone reads the same data folder.
+
+### Where things are
+
+| Path under `/ceph/project/P7-Agent-Harness/` | What |
+|---|---|
+| `data/processed/ais/date=YYYY-MM-DD/ais.parquet` | Input: a year of DMA data (2025-10-01..2026-09-30) as typed Parquet |
+| `data/clean/` | Cleaned positions and vessels, one folder per day (~45 GB) |
+| `data/derived/` | Trips, stops and simplified trip lines (~670 MB) |
+| `data/ais.duckdb` | Views over clean/ and derived/ that the API opens |
+| `logs/` | Slurm job logs |
+
+### Rebuild
+
+On AI-LAB, from your clone. Never run the pipeline directly on the login node (`ailab-fe01`):
+it's shared and too small, so always go through `sbatch`.
 
 ```sh
-sbatch slurm/clean_processed.slurm                         # one array task per month, ~1 h each
-sbatch --dependency=afterok:<job id> slurm/derive.slurm    # trips and stops, then ais.duckdb
-AIS_DATA_DIR=/ceph/project/P7-Agent-Harness/data uv run ais serve --port 8200
+ssh ailab-vpn
+cd ~/p7 && git pull
+
+sbatch slurm/clean_processed.slurm                          # prints: Submitted batch job 123456
+sbatch --dependency=afterok:123456 slurm/derive.slurm       # starts when all 12 clean tasks succeed
 ```
 
-Both jobs write to `$AIS_DATA_DIR` (default: the project's `data/`), logs go to its `logs/`.
-`derive` processes vessels in MMSI-range chunks of ~60M positions, so a year fits in memory;
-the result matches a single pass.
+| Job | What it does | Last full run |
+|---|---|---|
+| `clean_processed.slurm` | 12 array tasks (one per month, 4 at a time): `processed/` → `clean/` | ~4 h |
+| `derive.slurm` | All of `clean/` → `derived/`, then `ais.duckdb` | 2 h 55 min, 13 of 64 GB memory |
+
+Both run on the `l4` partition with `--gres=gpu:0` (AI-LAB has no CPU-only partition; this
+takes no GPU). They write to `$AIS_DATA_DIR`, which defaults to the project's `data/`.
+
+**Follow progress:**
+
+```sh
+squeue --me                                                         # running / waiting
+ls /ceph/project/P7-Agent-Harness/data/clean/positions | wc -l      # days cleaned, of 365
+tail -f /ceph/project/P7-Agent-Harness/logs/ais_derive_<job id>.out
+grep -l FAILED /ceph/project/P7-Agent-Harness/logs/ais_clean_<job id>_*.out   # failed months
+```
+
+**Things to know:**
+
+- Cleaning skips days that are already clean, so a failed or timed-out month is fixed by
+  submitting again. After changing a cleaning rule, re-clean everything with
+  `sbatch --export=ALL,FORCE=1 slurm/clean_processed.slurm`.
+- `derive` always rebuilds from all of `clean/` (trips cross midnight) and can't resume, so it
+  must finish within the 12 h limit. It processes vessels in MMSI-range chunks of ~60M
+  positions so a year fits in memory; the result matches a single pass.
+- `ais clean-processed START END` is what each task runs; on the dev days its output is
+  identical to the CSV route.
+- Restart the API afterwards so it picks up the new files:
+
+  ```sh
+  tmux kill-session -t p7-api
+  cd ~/p7 && tmux new -d -s p7-api "AIS_DATA_DIR=/ceph/project/P7-Agent-Harness/data ~/.local/bin/uv run ais serve --port 8200"
+  ```
 
 ## API
 

@@ -14,6 +14,7 @@
 #
 # Usage, from the repo root:
 #     sbatch slurm/clean_processed.slurm
+#     sbatch --export=ALL,FORCE=1 slurm/clean_processed.slurm    # re-clean every day
 #     sbatch --dependency=afterok:<job id> slurm/derive.slurm
 
 set -euo pipefail
@@ -33,9 +34,9 @@ echo "Node:     $(hostname)"
 echo "Job ID:   ${SLURM_ARRAY_JOB_ID:-none}_${TASK}"
 echo "Repo:     $REPO_DIR ($(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo '?'))"
 echo "Data:     $AIS_DATA_DIR"
-echo "Days:     $START .. $END"
+echo "Days:     $START .. $END${FORCE:+ (re-cleaning existing days)}"
 echo
 
 cd "$REPO_DIR"
 # ais.duckdb is rebuilt once by the derive job, not by 12 tasks at the same time.
-"$UV" run --frozen ais clean-processed "$START" "$END" --no-build
+"$UV" run --frozen ais clean-processed "$START" "$END" --no-build ${FORCE:+--force}
