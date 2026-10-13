@@ -4,6 +4,11 @@ LoRA fine-tune of the text-to-SQL student on data/text2sql (harness/gen_sql_data
 Runs inside the PyTorch container with envs/train, via slurm/train_student.slurm. Loss is on
 the SQL only (prompt-completion format). Writes the adapter to OUT-adapter and the merged
 bf16 model to OUT, which vLLM serves like any other model (slurm/eval_student.slurm).
+Checkpoints go to OUT-checkpoints every --save-steps steps and are never deleted. A run
+continues from the latest checkpoint there automatically (from scratch if there is none), so
+after a crash just resubmit with the same arguments. --resume STEP (or a checkpoint path)
+starts from an earlier checkpoint instead; later checkpoints are then overwritten as training
+passes their steps again. For a genuinely fresh run use a new --out.
 """
 
 import argparse
@@ -17,6 +22,7 @@ import trl.kernels.chunked_logprob
 from datasets import load_dataset
 from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.trainer_utils import get_last_checkpoint
 from trl import SFTConfig, SFTTrainer
 
 # The container's torch 2.10 pre-release rejects addmm(..., out_dtype=float32) with an fp32
@@ -41,7 +47,22 @@ def main() -> None:
     p.add_argument("--rank", type=int, default=16)
     p.add_argument("--batch", type=int, default=4)
     p.add_argument("--grad-accum", type=int, default=4)
+    p.add_argument("--save-steps", type=int, default=100, help="checkpoint interval (~15 min)")
+    p.add_argument("--resume", metavar="STEP_OR_PATH",
+                   help="start from this earlier checkpoint instead of the latest one "
+                        "(later checkpoints get overwritten)")
     args = p.parse_args()
+    checkpoint_dir = str(args.out) + "-checkpoints"
+    if args.resume:
+        resume_from = (args.resume if "/" in args.resume
+                       else f"{checkpoint_dir}/checkpoint-{int(args.resume)}")
+        if not Path(resume_from).is_dir():
+            raise SystemExit(f"--resume: {resume_from} does not exist")
+    elif Path(checkpoint_dir).is_dir():
+        resume_from = get_last_checkpoint(checkpoint_dir)  # None if no checkpoint yet
+    else:
+        resume_from = None
+    print(f"resuming from {resume_from}" if resume_from else "starting from scratch", flush=True)
 
     data = load_dataset("json", data_files={
         "train": str(args.data / "train.jsonl"), "val": str(args.data / "val.jsonl"),
@@ -52,7 +73,7 @@ def main() -> None:
     model = AutoModelForCausalLM.from_pretrained(args.base, dtype=torch.bfloat16)
 
     config = SFTConfig(
-        output_dir=str(args.out) + "-checkpoints",
+        output_dir=checkpoint_dir,
         num_train_epochs=args.epochs,
         max_steps=args.max_steps,
         per_device_train_batch_size=args.batch,
@@ -68,7 +89,8 @@ def main() -> None:
         logging_steps=10,
         eval_strategy="steps",
         eval_steps=100,
-        save_strategy="no",
+        save_strategy="steps",
+        save_steps=args.save_steps,  # no save_total_limit: old checkpoints are never deleted
         report_to="none",
         seed=0,
     )
@@ -84,7 +106,7 @@ def main() -> None:
         ),
     )
     start = time.time()
-    trainer.train()
+    trainer.train(resume_from_checkpoint=resume_from)
     metrics = trainer.evaluate()
 
     trainer.save_model(str(args.out) + "-adapter")
