@@ -46,8 +46,10 @@ If 8200 is taken on your machine, use `-L 8300:127.0.0.1:8200` and port 8300 bel
 
   api = httpx.Client(base_url="http://localhost:8200")
   ferry = api.get("/vessels", params={"q": "TYCHO BRAHE"}).json()[0]
-  route = api.get(f"/vessels/{ferry['mmsi']}/route",
-                  params={"start": "2026-01-01T00:00:00", "end": "2026-01-08T00:00:00"}).json()
+  route = api.get(
+      f"/vessels/{ferry['mmsi']}/route",
+      params={"start": "2026-01-01T00:00:00", "end": "2026-01-08T00:00:00"},
+  ).json()
   print(len(route["legs"]), "trips,", len(route["stops"]), "stops")
   ```
 
