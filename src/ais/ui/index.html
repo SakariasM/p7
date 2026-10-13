@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIS Explorer</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
+    --line: #e2e1dc; --accent: #1f5fbf; --accent-text: #ffffff; --hover: #f0efeb;
+    --error: #b42318;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: grid; grid-template-columns: 340px 1fr;
+  }
+  aside {
+    background: var(--panel); border-right: 1px solid var(--line);
+    overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 18px;
+  }
+  #map { height: 100%; }
+  h1 { font-size: 18px; margin: 0; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  input, select, button { font: inherit; }
+  input, select {
+    width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--panel); color: var(--text);
+  }
+  .row { display: flex; gap: 8px; align-items: end; }
+  .row > * { flex: 1; }
+  button {
+    padding: 7px 12px; border: 1px solid var(--accent); border-radius: 6px;
+    background: var(--accent); color: var(--accent-text); cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .5; cursor: progress; }
+  .status { font-size: 12px; color: var(--muted); margin-top: 6px; min-height: 1.4em; }
+  .status.error { color: var(--error); }
+  ul.list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 6px; max-height: 260px; overflow-y: auto; }
+  ul.list:empty { display: none; }
+  ul.list li { padding: 7px 10px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  ul.list li:last-child { border-bottom: 0; }
+  ul.list li:hover, ul.list li.active { background: var(--hover); }
+  .meta { color: var(--muted); font-size: 12px; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0 0 10px; font-size: 13px; }
+  dt { color: var(--muted); }
+  dd { margin: 0; }
+  .hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+  button.link {
+    padding: 0; border: 0; background: none; color: var(--accent); font-size: inherit;
+    text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent);
+    text-underline-offset: 2px;
+  }
+  button.link:hover { text-decoration-color: currentColor; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .ramp { width: 46px; height: 6px; border-radius: 3px; display: inline-block;
+    background: linear-gradient(90deg, hsl(200 80% 55%), hsl(280 70% 50%), hsl(345 85% 45%)); }
+  .leaflet-popup-content { font: 13px/1.45 system-ui, sans-serif; }
+  .leaflet-popup-content button { margin-top: 6px; padding: 4px 10px; }
+  @media (max-width: 760px) {
+    body { grid-template-columns: 1fr; grid-template-rows: auto 60vh; height: auto; }
+    aside { border-right: 0; border-bottom: 1px solid var(--line); }
+    #map { height: 60vh; }
+  }
+</style>
+</head>
+<body>
+<aside>
+  <div>
+    <h1>AIS Explorer</h1>
+    <div class="sub">P7 prototype · Danish waters, Oct 2025 – Sep 2026 · all times UTC</div>
+  </div>
+
+  <section>
+    <h2>Ships at a moment</h2>
+    <div class="row">
+      <div><label for="at">Time</label><input id="at" type="datetime-local" value="2026-01-20T12:00" min="2025-10-01T00:00" max="2026-09-30T23:59"></div>
+      <div style="flex:0 0 90px"><label for="lookback">Seen within</label>
+        <select id="lookback"><option value="5">5 min</option><option value="10" selected>10 min</option><option value="30">30 min</option><option value="60">60 min</option></select>
+      </div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <div><label for="name">Name contains</label><input id="name" placeholder="e.g. MAERSK" autocomplete="off"></div>
+      <div><label for="type">Ship type</label>
+        <select id="type"><option value="">All types</option></select>
+      </div>
+    </div>
+    <p class="hint" id="presets">
+      Try <button class="link" data-name="MAERSK">Maersk</button>,
+      <button class="link" data-name="SEAWAYS">DFDS</button>,
+      <button class="link" data-name="STENA">Stena</button> or
+      <button class="link" data-type="Sailing">sailing boats</button>.
+      <span id="clear-filter" hidden>· <button class="link" data-name="" data-type="">Clear</button></span>
+    </p>
+    <div class="row" style="margin-top:8px"><button id="snap">Show ships in view</button></div>
+    <div id="snap-status" class="status"></div>
+    <div id="legend" class="legend"></div>
+  </section>
+
+  <section>
+    <h2>Find a vessel</h2>
+    <input id="q" placeholder="Name, callsign or MMSI" autocomplete="off">
+    <div id="search-status" class="status"></div>
+    <ul id="results" class="list"></ul>
+  </section>
+
+  <section id="vessel-panel" hidden>
+    <h2>Vessel</h2>
+    <dl id="vessel"></dl>
+    <h2>Route</h2>
+    <div class="row">
+      <div><label for="route-from">From</label><input id="route-from" type="date" min="2025-10-01" max="2026-09-30"></div>
+      <div><label for="route-to">To</label><input id="route-to" type="date" min="2025-10-01" max="2026-09-30"></div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="route-btn">Show route</button>
+      <button id="clear-btn" class="ghost" style="flex:0 0 70px">Clear</button>
+    </div>
+    <div class="legend" id="route-legend" hidden style="margin-top:8px">
+      <span><i class="ramp"></i>earlier → later</span>
+      <span><i class="dot" style="background:#ffffff;border:2px solid #1d1d1b"></i>stop</span>
+    </div>
+    <div id="player" hidden>
+      <div class="row" style="margin-top:10px;align-items:center">
+        <button id="play-btn" style="flex:0 0 76px">Play</button>
+        <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Playback position">
+        <select id="speed" aria-label="Playback speed" style="flex:0 0 76px">
+          <option value="45000">Slow</option><option value="20000" selected>Normal</option><option value="8000">Fast</option>
+        </select>
+      </div>
+      <div id="play-time" class="status"></div>
+    </div>
+    <button id="track-btn" class="ghost" style="margin-top:8px;width:100%">Raw positions, 24 h around the time</button>
+    <div id="vessel-status" class="status"></div>
+    <h2 style="margin-top:12px">Trips (±15 days)</h2>
+    <ul id="trips" class="list"></ul>
+  </section>
+</aside>
+<div id="map"></div>
+
+<script>
+const COLORS = {
+  Cargo: "#1f5fbf", Tanker: "#c2410c", Passenger: "#7c3aed", Fishing: "#15803d",
+  Pleasure: "#db2777", Sailing: "#0e9fae", Tug: "#a16207",
+};
+const OTHER = "#8a8a84";
+const SHIP_TYPES = ["Cargo", "Tanker", "Passenger", "Fishing", "Pleasure", "Sailing", "Tug", "HSC",
+  "Pilot", "SAR", "Dredging", "Military", "Law enforcement", "Towing", "Port tender", "Other"];
+const colorFor = t => COLORS[t] || OTHER;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = ts => ts ? ts.replace("T", " ").slice(0, 16) : "–";
+const iso = d => d.toISOString().slice(0, 19);
+
+async function api(path, params = {}) {
+  const url = new URL(path, location.origin);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  const r = await fetch(url);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const d = body.detail;
+    throw new Error(typeof d === "string" ? d : Array.isArray(d) ? d.map(x => x.msg).join("; ") : r.statusText);
+  }
+  return body;
+}
+
+function setStatus(id, text, error = false) {
+  $(id).textContent = text;
+  $(id).classList.toggle("error", error);
+}
+
+// Map
+const map = L.map("map", { preferCanvas: true }).setView([56.0, 11.0], 7);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+}).addTo(map);
+const shipsLayer = L.layerGroup().addTo(map);
+const pathLayer = L.layerGroup().addTo(map);
+
+$("legend").innerHTML = [...Object.entries(COLORS), ["Other", OTHER]]
+  .map(([k, c]) => `<span><i class="dot" style="background:${c}"></i>${k}</span>`).join("");
+
+$("type").innerHTML += SHIP_TYPES.map(t => `<option>${t}</option>`).join("");
+// AIS has no owner field, so companies are found by name: Maersk ships are "... MAERSK",
+// DFDS ships "... SEAWAYS", Stena ships "STENA ...".
+const showClear = () => { $("clear-filter").hidden = !($("name").value.trim() || $("type").value); };
+$("presets").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  $("name").value = b.dataset.name || "";
+  $("type").value = b.dataset.type || "";
+  showClear();
+  loadSnapshot();
+});
+$("name").addEventListener("input", showClear);
+$("name").addEventListener("keydown", e => { if (e.key === "Enter") loadSnapshot(); });
+$("type").addEventListener("change", () => { showClear(); loadSnapshot(); });
+
+function atValue() {
+  const v = $("at").value;
+  return v.length === 16 ? v + ":00" : v;
+}
+
+// Snapshot
+async function loadSnapshot() {
+  const b = map.getBounds();
+  const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+  const bbox = [clamp(b.getWest(), -180, 180), clamp(b.getSouth(), -90, 90),
+                clamp(b.getEast(), -180, 180), clamp(b.getNorth(), -90, 90)].map(x => x.toFixed(4)).join(",");
+  $("snap").disabled = true;
+  setStatus("snap-status", "Loading…");
+  const t0 = performance.now();
+  try {
+    const params = { at: atValue(), lookback_min: $("lookback").value, bbox };
+    const name = $("name").value.trim(), type = $("type").value;
+    if (name) params.name = name;
+    if (type) params.ship_type = type;
+    const filtered = Boolean(name || type);
+    const s = await api("/snapshot", params);
+    shipsLayer.clearLayers();
+    for (const it of s.items) {
+      L.circleMarker([it.lat, it.lon], {
+        radius: filtered ? 6 : 4, weight: 1, color: "#ffffff", fillColor: colorFor(it.ship_type), fillOpacity: .9,
+      }).bindPopup(() => `
+        <b>${esc(it.name || "Unknown name")}</b><br>
+        ${esc(it.ship_type || "Unknown type")} · MMSI ${it.mmsi}<br>
+        ${it.sog != null ? it.sog.toFixed(1) + " kn" : "speed –"} · seen ${fmt(it.ts)}<br>
+        <button onclick="selectVessel(${it.mmsi})">Details &amp; trips</button>`)
+        .addTo(shipsLayer);
+    }
+    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    const what = [name && `named “${name}”`, type].filter(Boolean).join(", ");
+    setStatus("snap-status", `${s.items.length.toLocaleString()} ships${what ? " (" + what + ")" : ""}${s.truncated ? " (capped at 5,000; zoom in)" : ""} · ${secs}s`);
+  } catch (e) {
+    setStatus("snap-status", e.message, true);
+  } finally {
+    $("snap").disabled = false;
+  }
+}
+$("snap").onclick = loadSnapshot;
+
+// Search
+let searchTimer;
+$("q").addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  const q = $("q").value.trim();
+  if (!q) { $("results").innerHTML = ""; setStatus("search-status", ""); return; }
+  searchTimer = setTimeout(async () => {
+    try {
+      const vs = await api("/vessels", { q, limit: 15 });
+      setStatus("search-status", vs.length ? "" : "No matches");
+      $("results").innerHTML = vs.map(v => `
+        <li data-mmsi="${v.mmsi}"><b>${esc(v.name || "Unknown name")}</b>
+        <div class="meta">${esc(v.ship_type || "–")} · ${v.mmsi}${v.callsign ? " · " + esc(v.callsign) : ""}</div></li>`).join("");
+    } catch (e) { setStatus("search-status", e.message, true); }
+  }, 250);
+});
+$("results").addEventListener("click", e => {
+  const li = e.target.closest("li");
+  if (li) selectVessel(Number(li.dataset.mmsi));
+});
+
+// Vessel, trips, track
+let current = null;
+
+async function selectVessel(mmsi) {
+  current = mmsi;
+  map.closePopup();
+  const day0 = new Date(atValue() + "Z");
+  $("route-from").value = iso(new Date(day0 - 3 * 86400e3)).slice(0, 10);
+  $("route-to").value = iso(new Date(+day0 + 3 * 86400e3)).slice(0, 10);
+  $("vessel-panel").hidden = false;
+  $("vessel").innerHTML = "";
+  $("trips").innerHTML = "";
+  setStatus("vessel-status", "Loading…");
+  try {
+    const v = await api(`/vessels/${mmsi}`);
+    const dims = v.length ? `${v.length} × ${v.width ?? "?"} m` : "–";
+    $("vessel").innerHTML = `
+      <dt>Name</dt><dd><b>${esc(v.name || "Unknown")}</b></dd>
+      <dt>MMSI</dt><dd>${v.mmsi}${v.imo ? " · IMO " + v.imo : ""}</dd>
+      <dt>Type</dt><dd>${esc(v.ship_type || "–")}</dd>
+      <dt>Size</dt><dd>${dims}</dd>
+      <dt>Destination</dt><dd>${esc(v.destination || "–")}</dd>
+      <dt>Seen</dt><dd>${fmt(v.first_seen)} → ${fmt(v.last_seen)}</dd>`;
+    const at = new Date(atValue() + "Z");
+    const day = 86400e3;
+    const trips = await api("/trips", { mmsi, start: iso(new Date(at - 15 * day)), end: iso(new Date(+at + 15 * day)) });
+    setStatus("vessel-status", `${trips.length} trips in the 30 days around the selected time`);
+    $("trips").innerHTML = trips.map(t => `
+      <li data-trip="${esc(t.trip_id)}">${fmt(t.start_ts)}
+      <div class="meta">${(t.distance_m / 1852).toFixed(1)} nm · ${(t.duration_s / 3600).toFixed(1)} h · ${t.point_count} points</div></li>`).join("");
+  } catch (e) { setStatus("vessel-status", e.message, true); }
+}
+window.selectVessel = selectVessel;
+
+function drawLine(latlngs, label) {
+  pathLayer.clearLayers();
+  stopPlayer();
+  $("route-legend").hidden = true;
+  if (latlngs.length < 2) { setStatus("vessel-status", "Not enough points to draw", true); return; }
+  const line = L.polyline(latlngs, { color: "#e11d48", weight: 3 }).addTo(pathLayer);
+  L.circleMarker(latlngs[0], { radius: 5, color: "#15803d", fillOpacity: 1 }).bindTooltip("Start").addTo(pathLayer);
+  L.circleMarker(latlngs.at(-1), { radius: 5, color: "#b42318", fillOpacity: 1 }).bindTooltip("End").addTo(pathLayer);
+  map.fitBounds(line.getBounds(), { padding: [40, 40], maxZoom: 13 });
+  setStatus("vessel-status", label);
+}
+
+$("trips").addEventListener("click", async e => {
+  const li = e.target.closest("li");
+  if (!li) return;
+  document.querySelectorAll("#trips li.active").forEach(x => x.classList.remove("active"));
+  li.classList.add("active");
+  try {
+    const g = await api(`/trips/${encodeURIComponent(li.dataset.trip)}/geometry`);
+    drawLine(g.geometry.coordinates.map(([lon, lat]) => [lat, lon]), `Trip drawn (${g.geometry.coordinates.length} points)`);
+  } catch (err) { setStatus("vessel-status", err.message, true); }
+});
+
+$("track-btn").onclick = async () => {
+  if (!current) return;
+  const at = new Date(atValue() + "Z");
+  const half = 12 * 3600e3;
+  try {
+    const t = await api(`/vessels/${current}/track`, { start: iso(new Date(at - half)), end: iso(new Date(+at + half)) });
+    drawLine(t.points.map(p => [p.lat, p.lon]),
+      `24 h track: ${t.total_points.toLocaleString()} positions${t.downsampled ? ` (showing ${t.points.length})` : ""}`);
+  } catch (e) { setStatus("vessel-status", e.message, true); }
+};
+
+$("clear-btn").onclick = () => {
+  pathLayer.clearLayers();
+  stopPlayer();
+  $("route-legend").hidden = true;
+  setStatus("vessel-status", "");
+};
+
+// Colour a leg by when it happened: blue (start of the range) to red (end).
+const timeColor = f => `hsl(${200 + 145 * f} ${80 - 10 * Math.sin(Math.PI * f)}% ${55 - 10 * f}%)`;
+const hours = s => s >= 86400 ? `${(s / 86400).toFixed(1)} days` : `${(s / 3600).toFixed(1)} h`;
+
+// Playback: a dot travels the route in compressed time. Simplified lines carry no
+// per-point times, so each trip's points are spaced by distance between its start and end;
+// between trips (a stop or a gap in coverage) the dot waits where the last trip ended.
+let player = null;
+const toMs = ts => Date.parse(ts + "Z");
+
+function setupPlayer(legs) {
+  const prepared = legs.map(l => {
+    const pts = l.geometry.coordinates.map(([lon, lat]) => L.latLng(lat, lon));
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + pts[i - 1].distanceTo(pts[i]));
+    const total = cum.at(-1) || 1, t0 = toMs(l.start_ts), t1 = toMs(l.end_ts);
+    return { t0, t1, pts, times: cum.map(d => t0 + (t1 - t0) * d / total) };
+  });
+  const marker = L.circleMarker(prepared[0].pts[0], {
+    radius: 8, color: "#ffffff", weight: 3, fillColor: "#1d1d1b", fillOpacity: 1,
+  }).addTo(pathLayer);
+  player = { legs: prepared, t0: prepared[0].t0, t1: prepared.at(-1).t1, marker, t: prepared[0].t0, raf: 0, last: 0 };
+  $("player").hidden = false;
+  $("play-btn").textContent = "Play";
+  showAt(player.t0);
+}
+
+function positionAt(t) {
+  const legs = player.legs;
+  let i = legs.length - 1;
+  while (i > 0 && legs.at(i).t0 > t) i--;
+  const leg = legs.at(i);
+  if (t >= leg.t1) return leg.pts.at(-1);
+  if (t <= leg.t0) return leg.pts.at(0);
+  let j = 1;
+  while (j < leg.times.length - 1 && leg.times.at(j) < t) j++;
+  const a = leg.times.at(j - 1), b = leg.times.at(j), f = b > a ? (t - a) / (b - a) : 1;
+  const p = leg.pts.at(j - 1), q = leg.pts.at(j);
+  return L.latLng(p.lat + (q.lat - p.lat) * f, p.lng + (q.lng - p.lng) * f);
+}
+
+function showAt(t) {
+  player.t = t;
+  player.marker.setLatLng(positionAt(t));
+  $("scrub").value = Math.round(1000 * (t - player.t0) / (player.t1 - player.t0 || 1));
+  $("play-time").textContent = fmt(new Date(t).toISOString());
+}
+
+function frame(now) {
+  const step = (now - player.last) * (player.t1 - player.t0) / Number($("speed").value);
+  player.last = now;
+  const t = Math.min(player.t1, player.t + step);
+  showAt(t);
+  if (t < player.t1) player.raf = requestAnimationFrame(frame);
+  else pausePlayer();
+}
+
+function pausePlayer() {
+  if (!player) return;
+  cancelAnimationFrame(player.raf);
+  player.raf = 0;
+  $("play-btn").textContent = player.t >= player.t1 ? "Replay" : "Play";
+}
+
+function stopPlayer() {
+  pausePlayer();
+  player = null;
+  $("player").hidden = true;
+}
+
+$("play-btn").onclick = () => {
+  if (!player) return;
+  if (player.raf) { pausePlayer(); return; }
+  if (player.t >= player.t1) showAt(player.t0);
+  player.last = performance.now();
+  $("play-btn").textContent = "Pause";
+  player.raf = requestAnimationFrame(frame);
+};
+$("scrub").addEventListener("input", () => {
+  if (!player) return;
+  pausePlayer();
+  showAt(player.t0 + (player.t1 - player.t0) * $("scrub").value / 1000);
+  $("play-btn").textContent = "Play";
+});
+
+$("route-btn").onclick = async () => {
+  if (!current) return;
+  const from = $("route-from").value, to = $("route-to").value;
+  if (!from || !to || to < from) { setStatus("vessel-status", "Pick a From date on or before To", true); return; }
+  const start = new Date(from + "T00:00:00Z"), end = new Date(+new Date(to + "T00:00:00Z") + 86400e3);
+  if (end - start > 31 * 86400e3) { setStatus("vessel-status", "A route can cover at most 31 days", true); return; }
+  $("route-btn").disabled = true;
+  setStatus("vessel-status", "Loading route…");
+  try {
+    const r = await api(`/vessels/${current}/route`, { start: iso(start), end: iso(end) });
+    pathLayer.clearLayers();
+  stopPlayer();
+    if (!r.legs.length) { setStatus("vessel-status", "No trips in this range"); $("route-legend").hidden = true; return; }
+    const span = end - start;
+    const bounds = L.latLngBounds([]);
+    for (const leg of r.legs) {
+      const f = Math.min(1, Math.max(0, (new Date(leg.start_ts + "Z") - start) / span));
+      const ll = leg.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+      L.polyline(ll, { color: timeColor(f), weight: 3, opacity: .85 })
+        .bindTooltip(`${fmt(leg.start_ts)} → ${fmt(leg.end_ts)}<br>${(leg.distance_m / 1852).toFixed(1)} nm · ${hours(leg.duration_s)}`, { sticky: true })
+        .addTo(pathLayer);
+      ll.forEach(p => bounds.extend(p));
+    }
+    for (const s of r.stops) {
+      L.circleMarker([s.lat, s.lon], { radius: 5, color: "#1d1d1b", weight: 2, fillColor: "#ffffff", fillOpacity: 1 })
+        .bindTooltip(`Stopped ${hours(s.duration_s)}<br>${fmt(s.start_ts)} → ${fmt(s.end_ts)}`)
+        .addTo(pathLayer);
+    }
+    const first = r.legs[0].geometry.coordinates[0], last = r.legs.at(-1).geometry.coordinates.at(-1);
+    L.marker([first[1], first[0]], { title: "Start" }).bindTooltip("Start " + fmt(r.legs[0].start_ts)).addTo(pathLayer);
+    L.marker([last[1], last[0]], { title: "End" }).bindTooltip("End " + fmt(r.legs.at(-1).end_ts)).addTo(pathLayer);
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
+    $("route-legend").hidden = false;
+    setupPlayer(r.legs);
+    const nm = r.legs.reduce((a, l) => a + l.distance_m, 0) / 1852;
+    setStatus("vessel-status", `${r.legs.length} trips · ${Math.round(nm).toLocaleString()} nm · ${r.stops.length} stops`
+      + (r.truncated ? " (capped at 2,000 trips; shorten the range)" : ""));
+  } catch (e) {
+    setStatus("vessel-status", e.message, true);
+  } finally {
+    $("route-btn").disabled = false;
+  }
+};
+
+loadSnapshot();
+</script>
+</body>
+</html>

@@ -63,6 +63,16 @@ def test_snapshot_bbox_limit_and_truncation(store: AisStore) -> None:
     assert store.snapshot(DK, DAY_START - timedelta(hours=2), lb, 100).items == []
 
 
+def test_snapshot_filters_by_name_and_type(store: AisStore) -> None:
+    at, lb = DAY_START + timedelta(minutes=4), timedelta(minutes=10)
+    assert [i.mmsi for i in store.snapshot(DK, at, lb, 100, name="lph").items] == [A]
+    assert [i.mmsi for i in store.snapshot(DK, at, lb, 100, ship_type="Pleasure").items] == [B]
+    assert store.snapshot(DK, at, lb, 100, name="alpha", ship_type="Pleasure").items == []
+    # LIKE wildcards in the name match literally, not everything.
+    assert store.snapshot(DK, at, lb, 100, name="%").items == []
+    assert store.snapshot(DK, at, lb, 100, name="_").items == []
+
+
 def test_trips_and_stops_need_derive(store: AisStore) -> None:
     window = (DAY_START, DAY_START + timedelta(hours=1))
     with pytest.raises(DerivedDataMissing):

@@ -182,3 +182,14 @@ def test_chunked_derive_matches_a_single_pass(paths: DataPaths, derived: DeriveR
     assert derive(paths, max_chunk_positions=1) == derived  # one vessel per chunk
     assert len(list((paths.derived / "trips").glob("*.parquet"))) > 1
     assert contents() == single
+
+
+def test_route_matches_trips_and_stops(dstore: DuckDBStore) -> None:
+    start, end = T0 - timedelta(hours=1), T0 + timedelta(days=1)
+    r = dstore.route(STOP_THEN_GO, start, end, max_legs=100)
+    assert [leg.trip_id for leg in r.legs] == [
+        t.trip_id for t in dstore.trips(STOP_THEN_GO, start, end)
+    ]
+    assert len(r.stops) == 1 and not r.truncated
+    one = dstore.route(STOP_THEN_GO, start, end, max_legs=1)
+    assert one.truncated and len(one.legs) == 1
