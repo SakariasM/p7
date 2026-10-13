@@ -35,6 +35,9 @@ the result matches a single pass.
 
 ## API
 
+`ais serve` also serves a prototype map page at `/` (`src/ais/ui/index.html`): ships at a
+moment, vessel search, trips and tracks. It only calls the endpoints below.
+
 The contract is [`api/openapi.json`](api/openapi.json). Generate frontend types with:
 
 ```sh

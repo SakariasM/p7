@@ -1,10 +1,11 @@
 """HTTP API over an AisStore. All limits are enforced here, server-side."""
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path as FilePath
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 
 from ais.models import BBox, Snapshot, Stops, Track, Trip, TripGeometry, Vessel, VesselSummary
@@ -21,6 +22,7 @@ MAX_TRIPS_WINDOW = timedelta(days=31)
 MAX_STOPS_ITEMS = 5000
 
 BBOX_DOC = "min_lon,min_lat,max_lon,max_lat (WGS84), e.g. 7.5,54.5,15.5,58"
+UI_PAGE = FilePath(__file__).parent / "ui" / "index.html"
 MMSI = Annotated[int, Path(ge=200_000_000, le=799_999_999)]
 MMSIQuery = Annotated[int, Query(ge=200_000_000, le=799_999_999)]
 
@@ -72,6 +74,11 @@ def create_app(store: AisStore | None) -> FastAPI:
     @app.exception_handler(DerivedDataMissing)
     def _derived_missing(_: Request, e: DerivedDataMissing) -> JSONResponse:
         return JSONResponse({"detail": str(e)}, status_code=503)
+
+    @app.get("/", include_in_schema=False)
+    def ui() -> FileResponse:
+        """Prototype map page; it calls the endpoints below from the browser."""
+        return FileResponse(UI_PAGE)
 
     @app.get("/health")
     def health() -> dict[str, str]:

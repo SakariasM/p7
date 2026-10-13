@@ -116,3 +116,10 @@ def test_openapi_contract_is_committed_and_current() -> None:
     committed = Path(__file__).parents[1] / "api" / "openapi.json"
     current = json.dumps(create_app(None).openapi(), indent=2, sort_keys=True) + "\n"
     assert committed.read_text() == current, "run `uv run ais openapi`"
+
+
+def test_ui_page_is_served_but_not_in_the_contract(client: TestClient) -> None:
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    assert "/" not in client.get("/openapi.json").json()["paths"]
