@@ -132,3 +132,25 @@ class Stop(BaseModel):
 class Stops(BaseModel):
     truncated: bool
     items: list[Stop]
+
+
+class RouteLeg(BaseModel):
+    """One trip of a route, with its simplified line."""
+
+    trip_id: str
+    start_ts: datetime
+    end_ts: datetime
+    duration_s: float
+    distance_m: float
+    geometry: LineString
+
+
+class Route(BaseModel):
+    """Where one vessel went in a window: its trips in time order and the stops between them."""
+
+    mmsi: int
+    start: datetime
+    end: datetime
+    truncated: bool
+    legs: list[RouteLeg]
+    stops: list[Stop]

@@ -47,6 +47,93 @@
         "title": "LineString",
         "type": "object"
       },
+      "Route": {
+        "description": "Where one vessel went in a window: its trips in time order and the stops between them.",
+        "properties": {
+          "end": {
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/RouteLeg"
+            },
+            "title": "Legs",
+            "type": "array"
+          },
+          "mmsi": {
+            "title": "Mmsi",
+            "type": "integer"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "stops": {
+            "items": {
+              "$ref": "#/components/schemas/Stop"
+            },
+            "title": "Stops",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mmsi",
+          "start",
+          "end",
+          "truncated",
+          "legs",
+          "stops"
+        ],
+        "title": "Route",
+        "type": "object"
+      },
+      "RouteLeg": {
+        "description": "One trip of a route, with its simplified line.",
+        "properties": {
+          "distance_m": {
+            "title": "Distance M",
+            "type": "number"
+          },
+          "duration_s": {
+            "title": "Duration S",
+            "type": "number"
+          },
+          "end_ts": {
+            "format": "date-time",
+            "title": "End Ts",
+            "type": "string"
+          },
+          "geometry": {
+            "$ref": "#/components/schemas/LineString"
+          },
+          "start_ts": {
+            "format": "date-time",
+            "title": "Start Ts",
+            "type": "string"
+          },
+          "trip_id": {
+            "title": "Trip Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trip_id",
+          "start_ts",
+          "end_ts",
+          "duration_s",
+          "distance_m",
+          "geometry"
+        ],
+        "title": "RouteLeg",
+        "type": "object"
+      },
       "Snapshot": {
         "properties": {
           "at": {
@@ -1131,6 +1218,77 @@
         "summary": "Vessel",
         "tags": [
           "vessels"
+        ]
+      }
+    },
+    "/vessels/{mmsi}/route": {
+      "get": {
+        "description": "Where a vessel went: its trips as simplified lines, plus the stops between them.\nCovers up to 31 days in one call, unlike the raw 24 h track.",
+        "operationId": "route_vessels__mmsi__route_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mmsi",
+            "required": true,
+            "schema": {
+              "maximum": 799999999,
+              "minimum": 200000000,
+              "title": "Mmsi",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "Start",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "End",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Route"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "description": "Window invalid or longer than 31 days"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Trips/stops not built yet (`uv run ais derive`)"
+          }
+        },
+        "summary": "Route",
+        "tags": [
+          "trajectories"
         ]
       }
     },

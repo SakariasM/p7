@@ -4,7 +4,17 @@ implementation is a drop-in replacement verified by the same contract tests."""
 from datetime import datetime, timedelta
 from typing import Protocol
 
-from ais.models import BBox, Snapshot, Stops, Track, Trip, TripGeometry, Vessel, VesselSummary
+from ais.models import (
+    BBox,
+    Route,
+    Snapshot,
+    Stops,
+    Track,
+    Trip,
+    TripGeometry,
+    Vessel,
+    VesselSummary,
+)
 
 
 class DerivedDataMissing(RuntimeError):
@@ -35,6 +45,10 @@ class AisStore(Protocol):
         ...
 
     def trip_geometry(self, trip_id: str) -> TripGeometry | None: ...
+
+    def route(self, mmsi: int, start: datetime, end: datetime, max_legs: int) -> Route:
+        """Trips (with lines) and stops of one vessel overlapping [start, end], in time order."""
+        ...
 
     def stops(
         self, bbox: BBox, start: datetime, end: datetime, mmsi: int | None, max_items: int

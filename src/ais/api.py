@@ -8,7 +8,17 @@ from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 
-from ais.models import BBox, Snapshot, Stops, Track, Trip, TripGeometry, Vessel, VesselSummary
+from ais.models import (
+    BBox,
+    Route,
+    Snapshot,
+    Stops,
+    Track,
+    Trip,
+    TripGeometry,
+    Vessel,
+    VesselSummary,
+)
 from ais.store.base import AisStore, DerivedDataMissing
 
 MAX_SEARCH_RESULTS = 100
@@ -20,6 +30,7 @@ DEFAULT_LOOKBACK_MIN = 10
 MAX_SNAPSHOT_ITEMS = 5000
 MAX_TRIPS_WINDOW = timedelta(days=31)
 MAX_STOPS_ITEMS = 5000
+MAX_ROUTE_LEGS = 2000
 
 BBOX_DOC = "min_lon,min_lat,max_lon,max_lat (WGS84), e.g. 7.5,54.5,15.5,58"
 UI_PAGE = FilePath(__file__).parent / "ui" / "index.html"
@@ -177,6 +188,18 @@ def create_app(store: AisStore | None) -> FastAPI:
         if g is None:
             raise HTTPException(404, f"trip {trip_id} not found")
         return g
+
+    @app.get(
+        "/vessels/{mmsi}/route",
+        response_model=Route,
+        tags=["trajectories"],
+        responses={400: {"description": "Window invalid or longer than 31 days"}, **derived_503},
+    )
+    def route(s: StoreDep, mmsi: MMSI, start: datetime, end: datetime) -> Route:
+        """Where a vessel went: its trips as simplified lines, plus the stops between them.
+        Covers up to 31 days in one call, unlike the raw 24 h track."""
+        start, end = check_window(start, end, MAX_TRIPS_WINDOW)
+        return s.route(mmsi, start, end, MAX_ROUTE_LEGS)
 
     @app.get(
         "/stops",

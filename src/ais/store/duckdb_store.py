@@ -15,6 +15,8 @@ from ais.derive import DERIVED_TABLES
 from ais.models import (
     BBox,
     LineString,
+    Route,
+    RouteLeg,
     Snapshot,
     SnapshotItem,
     Stop,
@@ -79,6 +81,13 @@ def _rows(cur: duckdb.DuckDBPyConnection, sql: str, params: list[Any]) -> list[d
     cur.execute(sql, params)
     names = [d[0] for d in cur.description or []]
     return [dict(zip(names, row, strict=True)) for row in cur.fetchall()]
+
+
+def _line(geojson: str) -> LineString:
+    geom = json.loads(geojson)
+    # Simplifying a line whose points coincide can collapse it to a Point.
+    coords = geom["coordinates"] if geom["type"] == "LineString" else [geom["coordinates"]] * 2
+    return LineString(coordinates=[(c[0], c[1]) for c in coords])
 
 
 def _like_escape(s: str) -> str:
@@ -215,13 +224,40 @@ class DuckDBStore:
         rows = _rows(self._cursor(), "SELECT * FROM trip_geometry WHERE trip_id = ?", [trip_id])
         if not rows:
             return None
-        geom = json.loads(rows[0]["geojson"])
-        # Simplifying a line whose points coincide can collapse it to a Point.
-        coords = geom["coordinates"] if geom["type"] == "LineString" else [geom["coordinates"]] * 2
         return TripGeometry(
-            trip_id=trip_id,
-            mmsi=rows[0]["mmsi"],
-            geometry=LineString(coordinates=[(c[0], c[1]) for c in coords]),
+            trip_id=trip_id, mmsi=rows[0]["mmsi"], geometry=_line(rows[0]["geojson"])
+        )
+
+    def route(self, mmsi: int, start: datetime, end: datetime, max_legs: int) -> Route:
+        self._require_derived()
+        cur = self._cursor()
+        legs = _rows(
+            cur,
+            """
+            SELECT t.trip_id, t.start_ts, t.end_ts, t.duration_s, t.distance_m, g.geojson
+            FROM trips t JOIN trip_geometry g USING (trip_id)
+            WHERE t.mmsi = ? AND g.mmsi = ? AND t.start_ts <= ? AND t.end_ts >= ?
+            ORDER BY t.start_ts
+            LIMIT ?
+            """,
+            [mmsi, mmsi, end, start, max_legs + 1],
+        )
+        stops = _rows(
+            cur,
+            "SELECT * FROM stops WHERE mmsi = ? AND start_ts <= ? AND end_ts >= ?"
+            " ORDER BY start_ts LIMIT ?",
+            [mmsi, end, start, max_legs + 1],
+        )
+        return Route(
+            mmsi=mmsi,
+            start=start,
+            end=end,
+            truncated=len(legs) > max_legs or len(stops) > max_legs,
+            legs=[
+                RouteLeg.model_validate({**r, "geometry": _line(r.pop("geojson"))})
+                for r in legs[:max_legs]
+            ],
+            stops=[Stop.model_validate(r) for r in stops[:max_legs]],
         )
 
     def stops(

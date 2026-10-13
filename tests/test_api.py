@@ -119,6 +119,22 @@ def test_derived_endpoints(derived_client: TestClient) -> None:
     assert [s["point_count"] for s in stops["items"]] == [15]
 
 
+def test_route(derived_client: TestClient) -> None:
+    window = {"start": "2026-09-24T00:00:00", "end": "2026-09-25T00:00:00"}
+    r = derived_client.get("/vessels/219000011/route", params=window).json()
+    assert len(r["legs"]) == 2 and not r["truncated"]
+    assert r["legs"][0]["start_ts"] < r["legs"][1]["start_ts"]
+    assert r["legs"][0]["geometry"]["type"] == "LineString"
+    assert [s["point_count"] for s in r["stops"]] == [15]
+    long = {"start": "2026-08-01T00:00:00", "end": "2026-09-24T00:00:00"}
+    assert derived_client.get("/vessels/219000011/route", params=long).status_code == 400
+
+
+def test_route_503_until_derived(client: TestClient) -> None:
+    window = {"start": "2026-09-24T00:00:00", "end": "2026-09-25T00:00:00"}
+    assert client.get(f"/vessels/{A}/route", params=window).status_code == 503
+
+
 def test_openapi_contract_is_committed_and_current() -> None:
     import json
 

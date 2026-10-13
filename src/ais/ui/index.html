@@ -57,6 +57,8 @@
   .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
   .legend span { display: inline-flex; align-items: center; gap: 5px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .ramp { width: 46px; height: 6px; border-radius: 3px; display: inline-block;
+    background: linear-gradient(90deg, hsl(200 80% 55%), hsl(280 70% 50%), hsl(345 85% 45%)); }
   .leaflet-popup-content { font: 13px/1.45 system-ui, sans-serif; }
   .leaflet-popup-content button { margin-top: 6px; padding: 4px 10px; }
   @media (max-width: 760px) {
@@ -103,10 +105,20 @@
   <section id="vessel-panel" hidden>
     <h2>Vessel</h2>
     <dl id="vessel"></dl>
+    <h2>Route</h2>
     <div class="row">
-      <button id="track-btn" class="ghost">24 h track around time</button>
+      <div><label for="route-from">From</label><input id="route-from" type="date" min="2025-10-01" max="2026-09-30"></div>
+      <div><label for="route-to">To</label><input id="route-to" type="date" min="2025-10-01" max="2026-09-30"></div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="route-btn">Show route</button>
       <button id="clear-btn" class="ghost" style="flex:0 0 70px">Clear</button>
     </div>
+    <div class="legend" id="route-legend" hidden style="margin-top:8px">
+      <span><i class="ramp"></i>earlier → later</span>
+      <span><i class="dot" style="background:#ffffff;border:2px solid #1d1d1b"></i>stop</span>
+    </div>
+    <button id="track-btn" class="ghost" style="margin-top:8px;width:100%">Raw positions, 24 h around the time</button>
     <div id="vessel-status" class="status"></div>
     <h2 style="margin-top:12px">Trips (±15 days)</h2>
     <ul id="trips" class="list"></ul>
@@ -243,6 +255,9 @@ let current = null;
 async function selectVessel(mmsi) {
   current = mmsi;
   map.closePopup();
+  const day0 = new Date(atValue() + "Z");
+  $("route-from").value = iso(new Date(day0 - 3 * 86400e3)).slice(0, 10);
+  $("route-to").value = iso(new Date(+day0 + 3 * 86400e3)).slice(0, 10);
   $("vessel-panel").hidden = false;
   $("vessel").innerHTML = "";
   $("trips").innerHTML = "";
@@ -270,6 +285,7 @@ window.selectVessel = selectVessel;
 
 function drawLine(latlngs, label) {
   pathLayer.clearLayers();
+  $("route-legend").hidden = true;
   if (latlngs.length < 2) { setStatus("vessel-status", "Not enough points to draw", true); return; }
   const line = L.polyline(latlngs, { color: "#e11d48", weight: 3 }).addTo(pathLayer);
   L.circleMarker(latlngs[0], { radius: 5, color: "#15803d", fillOpacity: 1 }).bindTooltip("Start").addTo(pathLayer);
@@ -300,7 +316,57 @@ $("track-btn").onclick = async () => {
   } catch (e) { setStatus("vessel-status", e.message, true); }
 };
 
-$("clear-btn").onclick = () => { pathLayer.clearLayers(); setStatus("vessel-status", ""); };
+$("clear-btn").onclick = () => {
+  pathLayer.clearLayers();
+  $("route-legend").hidden = true;
+  setStatus("vessel-status", "");
+};
+
+// Colour a leg by when it happened: blue (start of the range) to red (end).
+const timeColor = f => `hsl(${200 + 145 * f} ${80 - 10 * Math.sin(Math.PI * f)}% ${55 - 10 * f}%)`;
+const hours = s => s >= 86400 ? `${(s / 86400).toFixed(1)} days` : `${(s / 3600).toFixed(1)} h`;
+
+$("route-btn").onclick = async () => {
+  if (!current) return;
+  const from = $("route-from").value, to = $("route-to").value;
+  if (!from || !to || to < from) { setStatus("vessel-status", "Pick a From date on or before To", true); return; }
+  const start = new Date(from + "T00:00:00Z"), end = new Date(+new Date(to + "T00:00:00Z") + 86400e3);
+  if (end - start > 31 * 86400e3) { setStatus("vessel-status", "A route can cover at most 31 days", true); return; }
+  $("route-btn").disabled = true;
+  setStatus("vessel-status", "Loading route…");
+  try {
+    const r = await api(`/vessels/${current}/route`, { start: iso(start), end: iso(end) });
+    pathLayer.clearLayers();
+    if (!r.legs.length) { setStatus("vessel-status", "No trips in this range"); $("route-legend").hidden = true; return; }
+    const span = end - start;
+    const bounds = L.latLngBounds([]);
+    for (const leg of r.legs) {
+      const f = Math.min(1, Math.max(0, (new Date(leg.start_ts + "Z") - start) / span));
+      const ll = leg.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+      L.polyline(ll, { color: timeColor(f), weight: 3, opacity: .85 })
+        .bindTooltip(`${fmt(leg.start_ts)} → ${fmt(leg.end_ts)}<br>${(leg.distance_m / 1852).toFixed(1)} nm · ${hours(leg.duration_s)}`, { sticky: true })
+        .addTo(pathLayer);
+      ll.forEach(p => bounds.extend(p));
+    }
+    for (const s of r.stops) {
+      L.circleMarker([s.lat, s.lon], { radius: 5, color: "#1d1d1b", weight: 2, fillColor: "#ffffff", fillOpacity: 1 })
+        .bindTooltip(`Stopped ${hours(s.duration_s)}<br>${fmt(s.start_ts)} → ${fmt(s.end_ts)}`)
+        .addTo(pathLayer);
+    }
+    const first = r.legs[0].geometry.coordinates[0], last = r.legs.at(-1).geometry.coordinates.at(-1);
+    L.marker([first[1], first[0]], { title: "Start" }).bindTooltip("Start " + fmt(r.legs[0].start_ts)).addTo(pathLayer);
+    L.marker([last[1], last[0]], { title: "End" }).bindTooltip("End " + fmt(r.legs.at(-1).end_ts)).addTo(pathLayer);
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
+    $("route-legend").hidden = false;
+    const nm = r.legs.reduce((a, l) => a + l.distance_m, 0) / 1852;
+    setStatus("vessel-status", `${r.legs.length} trips · ${Math.round(nm).toLocaleString()} nm · ${r.stops.length} stops`
+      + (r.truncated ? " (capped at 2,000 trips; shorten the range)" : ""));
+  } catch (e) {
+    setStatus("vessel-status", e.message, true);
+  } finally {
+    $("route-btn").disabled = false;
+  }
+};
 
 loadSnapshot();
 </script>
