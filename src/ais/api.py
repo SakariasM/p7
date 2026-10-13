@@ -131,9 +131,25 @@ def create_app(store: AisStore | None) -> FastAPI:
             int,
             Query(ge=1, le=MAX_LOOKBACK_MIN, description="Include vessels seen this recently"),
         ] = DEFAULT_LOOKBACK_MIN,
+        name: Annotated[
+            str | None,
+            Query(
+                min_length=1,
+                max_length=100,
+                description="Only vessels whose name contains this, any case (e.g. MAERSK)",
+            ),
+        ] = None,
+        ship_type: Annotated[
+            str | None, Query(max_length=50, description="Only this ship type, e.g. Cargo")
+        ] = None,
     ) -> Snapshot:
         return s.snapshot(
-            bbox, to_utc_naive(at), timedelta(minutes=lookback_min), MAX_SNAPSHOT_ITEMS
+            bbox,
+            to_utc_naive(at),
+            timedelta(minutes=lookback_min),
+            MAX_SNAPSHOT_ITEMS,
+            name.strip() or None if name else None,
+            ship_type,
         )
 
     derived_503 = {503: {"description": "Trips/stops not built yet (`uv run ais derive`)"}}

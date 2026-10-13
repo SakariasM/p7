@@ -52,6 +52,8 @@
   dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0 0 10px; font-size: 13px; }
   dt { color: var(--muted); }
   dd { margin: 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chips button { padding: 3px 9px; font-size: 12px; border-radius: 999px; background: transparent; color: var(--accent); }
   .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
   .legend span { display: inline-flex; align-items: center; gap: 5px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
@@ -79,6 +81,13 @@
         <select id="lookback"><option value="5">5 min</option><option value="10" selected>10 min</option><option value="30">30 min</option><option value="60">60 min</option></select>
       </div>
     </div>
+    <div class="row" style="margin-top:8px">
+      <div><label for="name">Name contains</label><input id="name" placeholder="e.g. MAERSK" autocomplete="off"></div>
+      <div><label for="type">Ship type</label>
+        <select id="type"><option value="">All types</option></select>
+      </div>
+    </div>
+    <div class="chips" id="presets"></div>
     <div class="row" style="margin-top:8px"><button id="snap">Show ships in view</button></div>
     <div id="snap-status" class="status"></div>
     <div id="legend" class="legend"></div>
@@ -111,6 +120,11 @@ const COLORS = {
   Pleasure: "#db2777", Sailing: "#0e9fae", Tug: "#a16207",
 };
 const OTHER = "#8a8a84";
+const SHIP_TYPES = ["Cargo", "Tanker", "Passenger", "Fishing", "Pleasure", "Sailing", "Tug", "HSC",
+  "Pilot", "SAR", "Dredging", "Military", "Law enforcement", "Towing", "Port tender", "Other"];
+// AIS has no owner field: companies are found by name (Maersk ships are named "... MAERSK").
+const PRESETS = [["Maersk", { name: "MAERSK" }], ["Seaways (DFDS)", { name: "SEAWAYS" }],
+  ["Stena", { name: "STENA" }], ["Sailing boats", { type: "Sailing" }], ["Clear filter", {}]];
 const colorFor = t => COLORS[t] || OTHER;
 
 const $ = id => document.getElementById(id);
@@ -146,6 +160,19 @@ const pathLayer = L.layerGroup().addTo(map);
 $("legend").innerHTML = [...Object.entries(COLORS), ["Other", OTHER]]
   .map(([k, c]) => `<span><i class="dot" style="background:${c}"></i>${k}</span>`).join("");
 
+$("type").innerHTML += SHIP_TYPES.map(t => `<option>${t}</option>`).join("");
+$("presets").innerHTML = PRESETS.map(([label], i) => `<button data-i="${i}">${label}</button>`).join("");
+$("presets").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  const p = PRESETS[b.dataset.i][1];
+  $("name").value = p.name || "";
+  $("type").value = p.type || "";
+  loadSnapshot();
+});
+$("name").addEventListener("keydown", e => { if (e.key === "Enter") loadSnapshot(); });
+$("type").addEventListener("change", loadSnapshot);
+
 function atValue() {
   const v = $("at").value;
   return v.length === 16 ? v + ":00" : v;
@@ -161,11 +188,16 @@ async function loadSnapshot() {
   setStatus("snap-status", "Loading…");
   const t0 = performance.now();
   try {
-    const s = await api("/snapshot", { at: atValue(), lookback_min: $("lookback").value, bbox });
+    const params = { at: atValue(), lookback_min: $("lookback").value, bbox };
+    const name = $("name").value.trim(), type = $("type").value;
+    if (name) params.name = name;
+    if (type) params.ship_type = type;
+    const filtered = Boolean(name || type);
+    const s = await api("/snapshot", params);
     shipsLayer.clearLayers();
     for (const it of s.items) {
       L.circleMarker([it.lat, it.lon], {
-        radius: 4, weight: 1, color: "#ffffff", fillColor: colorFor(it.ship_type), fillOpacity: .9,
+        radius: filtered ? 6 : 4, weight: 1, color: "#ffffff", fillColor: colorFor(it.ship_type), fillOpacity: .9,
       }).bindPopup(() => `
         <b>${esc(it.name || "Unknown name")}</b><br>
         ${esc(it.ship_type || "Unknown type")} · MMSI ${it.mmsi}<br>
@@ -174,7 +206,8 @@ async function loadSnapshot() {
         .addTo(shipsLayer);
     }
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
-    setStatus("snap-status", `${s.items.length.toLocaleString()} ships${s.truncated ? " (capped at 5,000; zoom in)" : ""} · ${secs}s`);
+    const what = [name && `named “${name}”`, type].filter(Boolean).join(", ");
+    setStatus("snap-status", `${s.items.length.toLocaleString()} ships${what ? " (" + what + ")" : ""}${s.truncated ? " (capped at 5,000; zoom in)" : ""} · ${secs}s`);
   } catch (e) {
     setStatus("snap-status", e.message, true);
   } finally {

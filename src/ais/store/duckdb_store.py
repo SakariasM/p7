@@ -81,6 +81,11 @@ def _rows(cur: duckdb.DuckDBPyConnection, sql: str, params: list[Any]) -> list[d
     return [dict(zip(names, row, strict=True)) for row in cur.fetchall()]
 
 
+def _like_escape(s: str) -> str:
+    """Make LIKE's % and _ match themselves (used with ESCAPE '\\')."""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class DuckDBStore:
     def __init__(self, paths: DataPaths) -> None:
         if not any(paths.clean.glob("positions/date=*/*.parquet")):
@@ -142,7 +147,15 @@ class DuckDBStore:
             points=[TrackPoint.model_validate(r) for r in rows],
         )
 
-    def snapshot(self, bbox: BBox, at: datetime, lookback: timedelta, max_items: int) -> Snapshot:
+    def snapshot(
+        self,
+        bbox: BBox,
+        at: datetime,
+        lookback: timedelta,
+        max_items: int,
+        name: str | None = None,
+        ship_type: str | None = None,
+    ) -> Snapshot:
         since = at - lookback
         rows = _rows(
             self._cursor(),
@@ -155,6 +168,8 @@ class DuckDBStore:
             SELECT l.*, v.name, v.ship_type
             FROM latest l LEFT JOIN vessels v USING (mmsi)
             WHERE l.lon BETWEEN ? AND ? AND l.lat BETWEEN ? AND ?
+              AND (?::VARCHAR IS NULL OR v.name ILIKE '%' || ? || '%' ESCAPE '\\')
+              AND (?::VARCHAR IS NULL OR v.ship_type = ?)
             ORDER BY l.mmsi
             LIMIT ?
             """,
@@ -167,6 +182,10 @@ class DuckDBStore:
                 bbox.max_lon,
                 bbox.min_lat,
                 bbox.max_lat,
+                name,
+                name and _like_escape(name),
+                ship_type,
+                ship_type,
                 max_items + 1,
             ],
         )

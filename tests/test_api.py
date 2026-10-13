@@ -71,6 +71,15 @@ def test_snapshot(client: TestClient) -> None:
     assert {i["mmsi"] for i in r.json()["items"]} == {219000001, 219000002}
 
 
+def test_snapshot_filters(client: TestClient) -> None:
+    base = {"bbox": BBOX, "at": "2026-09-24T00:05:00"}
+    r = client.get("/snapshot", params={**base, "name": "bravo"})
+    assert [i["mmsi"] for i in r.json()["items"]] == [219000002]
+    r = client.get("/snapshot", params={**base, "ship_type": "Cargo"})
+    assert [i["mmsi"] for i in r.json()["items"]] == [219000001]
+    assert client.get("/snapshot", params={**base, "name": ""}).status_code == 422
+
+
 @pytest.mark.parametrize(
     "params",
     [
