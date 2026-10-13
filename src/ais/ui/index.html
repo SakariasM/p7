@@ -129,6 +129,16 @@
       <span><i class="ramp"></i>earlier → later</span>
       <span><i class="dot" style="background:#ffffff;border:2px solid #1d1d1b"></i>stop</span>
     </div>
+    <div id="player" hidden>
+      <div class="row" style="margin-top:10px;align-items:center">
+        <button id="play-btn" style="flex:0 0 76px">Play</button>
+        <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Playback position">
+        <select id="speed" aria-label="Playback speed" style="flex:0 0 76px">
+          <option value="45000">Slow</option><option value="20000" selected>Normal</option><option value="8000">Fast</option>
+        </select>
+      </div>
+      <div id="play-time" class="status"></div>
+    </div>
     <button id="track-btn" class="ghost" style="margin-top:8px;width:100%">Raw positions, 24 h around the time</button>
     <div id="vessel-status" class="status"></div>
     <h2 style="margin-top:12px">Trips (±15 days)</h2>
@@ -296,6 +306,7 @@ window.selectVessel = selectVessel;
 
 function drawLine(latlngs, label) {
   pathLayer.clearLayers();
+  stopPlayer();
   $("route-legend").hidden = true;
   if (latlngs.length < 2) { setStatus("vessel-status", "Not enough points to draw", true); return; }
   const line = L.polyline(latlngs, { color: "#e11d48", weight: 3 }).addTo(pathLayer);
@@ -329,6 +340,7 @@ $("track-btn").onclick = async () => {
 
 $("clear-btn").onclick = () => {
   pathLayer.clearLayers();
+  stopPlayer();
   $("route-legend").hidden = true;
   setStatus("vessel-status", "");
 };
@@ -336,6 +348,87 @@ $("clear-btn").onclick = () => {
 // Colour a leg by when it happened: blue (start of the range) to red (end).
 const timeColor = f => `hsl(${200 + 145 * f} ${80 - 10 * Math.sin(Math.PI * f)}% ${55 - 10 * f}%)`;
 const hours = s => s >= 86400 ? `${(s / 86400).toFixed(1)} days` : `${(s / 3600).toFixed(1)} h`;
+
+// Playback: a dot travels the route in compressed time. Simplified lines carry no
+// per-point times, so each trip's points are spaced by distance between its start and end;
+// between trips (a stop or a gap in coverage) the dot waits where the last trip ended.
+let player = null;
+const toMs = ts => Date.parse(ts + "Z");
+
+function setupPlayer(legs) {
+  const prepared = legs.map(l => {
+    const pts = l.geometry.coordinates.map(([lon, lat]) => L.latLng(lat, lon));
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + pts[i - 1].distanceTo(pts[i]));
+    const total = cum.at(-1) || 1, t0 = toMs(l.start_ts), t1 = toMs(l.end_ts);
+    return { t0, t1, pts, times: cum.map(d => t0 + (t1 - t0) * d / total) };
+  });
+  const marker = L.circleMarker(prepared[0].pts[0], {
+    radius: 8, color: "#ffffff", weight: 3, fillColor: "#1d1d1b", fillOpacity: 1,
+  }).addTo(pathLayer);
+  player = { legs: prepared, t0: prepared[0].t0, t1: prepared.at(-1).t1, marker, t: prepared[0].t0, raf: 0, last: 0 };
+  $("player").hidden = false;
+  $("play-btn").textContent = "Play";
+  showAt(player.t0);
+}
+
+function positionAt(t) {
+  const legs = player.legs;
+  let i = legs.length - 1;
+  while (i > 0 && legs.at(i).t0 > t) i--;
+  const leg = legs.at(i);
+  if (t >= leg.t1) return leg.pts.at(-1);
+  if (t <= leg.t0) return leg.pts.at(0);
+  let j = 1;
+  while (j < leg.times.length - 1 && leg.times.at(j) < t) j++;
+  const a = leg.times.at(j - 1), b = leg.times.at(j), f = b > a ? (t - a) / (b - a) : 1;
+  const p = leg.pts.at(j - 1), q = leg.pts.at(j);
+  return L.latLng(p.lat + (q.lat - p.lat) * f, p.lng + (q.lng - p.lng) * f);
+}
+
+function showAt(t) {
+  player.t = t;
+  player.marker.setLatLng(positionAt(t));
+  $("scrub").value = Math.round(1000 * (t - player.t0) / (player.t1 - player.t0 || 1));
+  $("play-time").textContent = fmt(new Date(t).toISOString());
+}
+
+function frame(now) {
+  const step = (now - player.last) * (player.t1 - player.t0) / Number($("speed").value);
+  player.last = now;
+  const t = Math.min(player.t1, player.t + step);
+  showAt(t);
+  if (t < player.t1) player.raf = requestAnimationFrame(frame);
+  else pausePlayer();
+}
+
+function pausePlayer() {
+  if (!player) return;
+  cancelAnimationFrame(player.raf);
+  player.raf = 0;
+  $("play-btn").textContent = player.t >= player.t1 ? "Replay" : "Play";
+}
+
+function stopPlayer() {
+  pausePlayer();
+  player = null;
+  $("player").hidden = true;
+}
+
+$("play-btn").onclick = () => {
+  if (!player) return;
+  if (player.raf) { pausePlayer(); return; }
+  if (player.t >= player.t1) showAt(player.t0);
+  player.last = performance.now();
+  $("play-btn").textContent = "Pause";
+  player.raf = requestAnimationFrame(frame);
+};
+$("scrub").addEventListener("input", () => {
+  if (!player) return;
+  pausePlayer();
+  showAt(player.t0 + (player.t1 - player.t0) * $("scrub").value / 1000);
+  $("play-btn").textContent = "Play";
+});
 
 $("route-btn").onclick = async () => {
   if (!current) return;
@@ -348,6 +441,7 @@ $("route-btn").onclick = async () => {
   try {
     const r = await api(`/vessels/${current}/route`, { start: iso(start), end: iso(end) });
     pathLayer.clearLayers();
+  stopPlayer();
     if (!r.legs.length) { setStatus("vessel-status", "No trips in this range"); $("route-legend").hidden = true; return; }
     const span = end - start;
     const bounds = L.latLngBounds([]);
@@ -369,6 +463,7 @@ $("route-btn").onclick = async () => {
     L.marker([last[1], last[0]], { title: "End" }).bindTooltip("End " + fmt(r.legs.at(-1).end_ts)).addTo(pathLayer);
     map.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
     $("route-legend").hidden = false;
+    setupPlayer(r.legs);
     const nm = r.legs.reduce((a, l) => a + l.distance_m, 0) / 1852;
     setStatus("vessel-status", `${r.legs.length} trips · ${Math.round(nm).toLocaleString()} nm · ${r.stops.length} stops`
       + (r.truncated ? " (capped at 2,000 trips; shorten the range)" : ""));
