@@ -1,0 +1,758 @@
+[
+ {
+  "id": "vessels_place_window_01",
+  "question": "How many vessels were in Kappeln between 00:00 and 01:00 UTC on 22 September?",
+  "tags": [
+   "vessels_place_window",
+   "new_place"
+  ],
+  "sql": "SELECT count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-22'\n  AND ts >= TIMESTAMP '2026-09-22 00:00:00' AND ts < TIMESTAMP '2026-09-22 01:00:00'\n  AND lon BETWEEN 9.931 AND 9.943 AND lat BETWEEN 54.648 AND 54.668"
+ },
+ {
+  "id": "vessels_place_window_02",
+  "question": "How many vessels were in Avedore between 01:00 and 02:00 UTC on 23 September?",
+  "tags": [
+   "vessels_place_window",
+   "new_place"
+  ],
+  "sql": "SELECT count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-23'\n  AND ts >= TIMESTAMP '2026-09-23 01:00:00' AND ts < TIMESTAMP '2026-09-23 02:00:00'\n  AND lon BETWEEN 12.479 AND 12.489 AND lat BETWEEN 55.596 AND 55.606"
+ },
+ {
+  "id": "vessels_place_window_03",
+  "question": "How many vessels were in Stigsnaes Inter Terminal between 07:00 and 08:00 UTC on 22 September 2026?",
+  "tags": [
+   "vessels_place_window",
+   "new_place"
+  ],
+  "sql": "SELECT count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-22'\n  AND ts >= TIMESTAMP '2026-09-22 07:00:00' AND ts < TIMESTAMP '2026-09-22 08:00:00'\n  AND lon BETWEEN 11.241 AND 11.26 AND lat BETWEEN 55.197 AND 55.212"
+ },
+ {
+  "id": "vessels_place_window_04",
+  "question": "How many vessels were in Haderslev between 17:00 and 18:00 UTC on 22 September 2026?",
+  "tags": [
+   "vessels_place_window",
+   "new_place"
+  ],
+  "sql": "SELECT count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-22'\n  AND ts >= TIMESTAMP '2026-09-22 17:00:00' AND ts < TIMESTAMP '2026-09-22 18:00:00'\n  AND lon BETWEEN 9.497 AND 9.507 AND lat BETWEEN 55.228 AND 55.254"
+ },
+ {
+  "id": "vessels_place_window_05",
+  "question": "How many vessels were in Sønderborg between 22:00 and 23:00 UTC on September 24?",
+  "tags": [
+   "vessels_place_window",
+   "new_place"
+  ],
+  "sql": "SELECT count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-24'\n  AND ts >= TIMESTAMP '2026-09-24 22:00:00' AND ts < TIMESTAMP '2026-09-24 23:00:00'\n  AND lon BETWEEN 9.763 AND 9.788 AND lat BETWEEN 54.904 AND 54.92"
+ },
+ {
+  "id": "vessels_place_window_06",
+  "question": "How many vessels were in Odense between 05:00 and 06:00 UTC on September 22?",
+  "tags": [
+   "vessels_place_window",
+   "new_place"
+  ],
+  "sql": "SELECT count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-22'\n  AND ts >= TIMESTAMP '2026-09-22 05:00:00' AND ts < TIMESTAMP '2026-09-22 06:00:00'\n  AND lon BETWEEN 10.376 AND 10.543 AND lat BETWEEN 55.411 AND 55.475"
+ },
+ {
+  "id": "vessels_place_window_07",
+  "question": "How many vessels were in Havneby between 04:00 and 05:00 UTC on September 23?",
+  "tags": [
+   "vessels_place_window",
+   "new_place"
+  ],
+  "sql": "SELECT count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-23'\n  AND ts >= TIMESTAMP '2026-09-23 04:00:00' AND ts < TIMESTAMP '2026-09-23 05:00:00'\n  AND lon BETWEEN 8.562 AND 8.574 AND lat BETWEEN 55.081 AND 55.092"
+ },
+ {
+  "id": "vessels_place_window_08",
+  "question": "How many vessels were in Wewelsfleth between 11:00 and 12:00 UTC on September 23?",
+  "tags": [
+   "vessels_place_window",
+   "new_place"
+  ],
+  "sql": "SELECT count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-23'\n  AND ts >= TIMESTAMP '2026-09-23 11:00:00' AND ts < TIMESTAMP '2026-09-23 12:00:00'\n  AND lon BETWEEN 9.398 AND 9.412 AND lat BETWEEN 53.835 AND 53.847"
+ },
+ {
+  "id": "vessels_place_window_09",
+  "question": "How many vessels were in Skagen between 14:00 and 15:00 UTC on 22 September?",
+  "tags": [
+   "vessels_place_window",
+   "original_place"
+  ],
+  "sql": "SELECT count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-22'\n  AND ts >= TIMESTAMP '2026-09-22 14:00:00' AND ts < TIMESTAMP '2026-09-22 15:00:00'\n  AND lon BETWEEN 10.55 AND 10.65 AND lat BETWEEN 57.70 AND 57.74"
+ },
+ {
+  "id": "vessels_place_window_10",
+  "question": "How many vessels were in Skagen between 02:00 and 03:00 UTC on September 23?",
+  "tags": [
+   "vessels_place_window",
+   "original_place"
+  ],
+  "sql": "SELECT count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-23'\n  AND ts >= TIMESTAMP '2026-09-23 02:00:00' AND ts < TIMESTAMP '2026-09-23 03:00:00'\n  AND lon BETWEEN 10.55 AND 10.65 AND lat BETWEEN 57.70 AND 57.74"
+ },
+ {
+  "id": "vessels_place_window_11",
+  "question": "How many vessels were in Helsingborg between 19:00 and 20:00 UTC on 24 September 2026?",
+  "tags": [
+   "vessels_place_window",
+   "original_place"
+  ],
+  "sql": "SELECT count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-24'\n  AND ts >= TIMESTAMP '2026-09-24 19:00:00' AND ts < TIMESTAMP '2026-09-24 20:00:00'\n  AND lon BETWEEN 12.68 AND 12.71 AND lat BETWEEN 56.03 AND 56.06"
+ },
+ {
+  "id": "vessels_place_window_12",
+  "question": "How many vessels were in Copenhagen between 22:00 and 23:00 UTC on 22 September?",
+  "tags": [
+   "vessels_place_window",
+   "original_place"
+  ],
+  "sql": "SELECT count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-22'\n  AND ts >= TIMESTAMP '2026-09-22 22:00:00' AND ts < TIMESTAMP '2026-09-22 23:00:00'\n  AND lon BETWEEN 12.53 AND 12.66 AND lat BETWEEN 55.64 AND 55.73"
+ },
+ {
+  "id": "hourly_counts_place_01",
+  "question": "How many vessels were in the Great Belt in each hour of September 24?",
+  "tags": [
+   "hourly_counts_place",
+   "new_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc, count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-24' AND lon BETWEEN 10.70 AND 11.30 AND lat BETWEEN 54.90 AND 55.80\nGROUP BY 1 ORDER BY 1"
+ },
+ {
+  "id": "hourly_counts_place_02",
+  "question": "How many vessels were in the Great Belt in each hour of 22 September?",
+  "tags": [
+   "hourly_counts_place",
+   "new_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc, count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-22' AND lon BETWEEN 10.70 AND 11.30 AND lat BETWEEN 54.90 AND 55.80\nGROUP BY 1 ORDER BY 1"
+ },
+ {
+  "id": "hourly_counts_place_03",
+  "question": "How many vessels were in Grenaa in each hour of September 23?",
+  "tags": [
+   "hourly_counts_place",
+   "new_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc, count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-23' AND lon BETWEEN 10.918 AND 10.938 AND lat BETWEEN 56.401 AND 56.425\nGROUP BY 1 ORDER BY 1"
+ },
+ {
+  "id": "hourly_counts_place_04",
+  "question": "How many vessels were in the Isefjord in each hour of 24 September?",
+  "tags": [
+   "hourly_counts_place",
+   "new_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc, count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-24' AND lon BETWEEN 11.65 AND 11.95 AND lat BETWEEN 55.70 AND 55.98\nGROUP BY 1 ORDER BY 1"
+ },
+ {
+  "id": "hourly_counts_place_05",
+  "question": "How many vessels were in the Isefjord in each hour of 23 September?",
+  "tags": [
+   "hourly_counts_place",
+   "new_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc, count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-23' AND lon BETWEEN 11.65 AND 11.95 AND lat BETWEEN 55.70 AND 55.98\nGROUP BY 1 ORDER BY 1"
+ },
+ {
+  "id": "hourly_counts_place_06",
+  "question": "How many vessels were in Grenaa in each hour of 24 September 2026?",
+  "tags": [
+   "hourly_counts_place",
+   "new_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc, count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-24' AND lon BETWEEN 10.918 AND 10.938 AND lat BETWEEN 56.401 AND 56.425\nGROUP BY 1 ORDER BY 1"
+ },
+ {
+  "id": "hourly_counts_place_07",
+  "question": "How many vessels were in Rønne in each hour of 24 September?",
+  "tags": [
+   "hourly_counts_place",
+   "new_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc, count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-24' AND lon BETWEEN 14.678 AND 14.704 AND lat BETWEEN 55.083 AND 55.107\nGROUP BY 1 ORDER BY 1"
+ },
+ {
+  "id": "hourly_counts_place_08",
+  "question": "How many vessels were in Swinoujscie in each hour of 24 September?",
+  "tags": [
+   "hourly_counts_place",
+   "new_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc, count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-24' AND lon BETWEEN 14.244 AND 14.286 AND lat BETWEEN 53.882 AND 53.92\nGROUP BY 1 ORDER BY 1"
+ },
+ {
+  "id": "hourly_counts_place_09",
+  "question": "How many vessels were in Skagen in each hour of September 22?",
+  "tags": [
+   "hourly_counts_place",
+   "original_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc, count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-22' AND lon BETWEEN 10.55 AND 10.65 AND lat BETWEEN 57.70 AND 57.74\nGROUP BY 1 ORDER BY 1"
+ },
+ {
+  "id": "hourly_counts_place_10",
+  "question": "How many vessels were in the Øresund in each hour of 23 September?",
+  "tags": [
+   "hourly_counts_place",
+   "original_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc, count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-23' AND lon BETWEEN 12.40 AND 12.95 AND lat BETWEEN 55.50 AND 56.15\nGROUP BY 1 ORDER BY 1"
+ },
+ {
+  "id": "hourly_counts_place_11",
+  "question": "How many vessels were in Helsingborg in each hour of 24 September?",
+  "tags": [
+   "hourly_counts_place",
+   "original_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc, count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-24' AND lon BETWEEN 12.68 AND 12.71 AND lat BETWEEN 56.03 AND 56.06\nGROUP BY 1 ORDER BY 1"
+ },
+ {
+  "id": "hourly_counts_place_12",
+  "question": "How many vessels were in Aarhus in each hour of September 22?",
+  "tags": [
+   "hourly_counts_place",
+   "original_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc, count(DISTINCT mmsi) AS vessels FROM vessel_positions\nWHERE date = DATE '2026-09-22' AND lon BETWEEN 10.20 AND 10.27 AND lat BETWEEN 56.13 AND 56.17\nGROUP BY 1 ORDER BY 1"
+ },
+ {
+  "id": "busiest_hour_place_01",
+  "question": "Which hour on 23 September had the most vessels in Grenaa?",
+  "tags": [
+   "busiest_hour_place",
+   "new_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc FROM vessel_positions\nWHERE date = DATE '2026-09-23' AND lon BETWEEN 10.918 AND 10.938 AND lat BETWEEN 56.401 AND 56.425\nGROUP BY 1 ORDER BY count(DISTINCT mmsi) DESC, hour_utc LIMIT 1"
+ },
+ {
+  "id": "busiest_hour_place_02",
+  "question": "Which hour on 22 September 2026 had the most vessels in Odense?",
+  "tags": [
+   "busiest_hour_place",
+   "new_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc FROM vessel_positions\nWHERE date = DATE '2026-09-22' AND lon BETWEEN 10.376 AND 10.543 AND lat BETWEEN 55.411 AND 55.475\nGROUP BY 1 ORDER BY count(DISTINCT mmsi) DESC, hour_utc LIMIT 1"
+ },
+ {
+  "id": "busiest_hour_place_03",
+  "question": "Which hour on 23 September 2026 had the most vessels in the Fehmarn Belt?",
+  "tags": [
+   "busiest_hour_place",
+   "new_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc FROM vessel_positions\nWHERE date = DATE '2026-09-23' AND lon BETWEEN 10.95 AND 11.60 AND lat BETWEEN 54.40 AND 54.70\nGROUP BY 1 ORDER BY count(DISTINCT mmsi) DESC, hour_utc LIMIT 1"
+ },
+ {
+  "id": "busiest_hour_place_04",
+  "question": "Which hour on 23 September 2026 had the most vessels in Kiel?",
+  "tags": [
+   "busiest_hour_place",
+   "new_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc FROM vessel_positions\nWHERE date = DATE '2026-09-23' AND lon BETWEEN 10.116 AND 10.184 AND lat BETWEEN 54.311 AND 54.39\nGROUP BY 1 ORDER BY count(DISTINCT mmsi) DESC, hour_utc LIMIT 1"
+ },
+ {
+  "id": "busiest_hour_place_05",
+  "question": "Which hour on September 23 had the most vessels in Cuxhaven?",
+  "tags": [
+   "busiest_hour_place",
+   "new_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc FROM vessel_positions\nWHERE date = DATE '2026-09-23' AND lon BETWEEN 8.698 AND 8.751 AND lat BETWEEN 53.846 AND 53.88\nGROUP BY 1 ORDER BY count(DISTINCT mmsi) DESC, hour_utc LIMIT 1"
+ },
+ {
+  "id": "busiest_hour_place_06",
+  "question": "Which hour on 22 September 2026 had the most vessels in the Great Belt?",
+  "tags": [
+   "busiest_hour_place",
+   "new_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc FROM vessel_positions\nWHERE date = DATE '2026-09-22' AND lon BETWEEN 10.70 AND 11.30 AND lat BETWEEN 54.90 AND 55.80\nGROUP BY 1 ORDER BY count(DISTINCT mmsi) DESC, hour_utc LIMIT 1"
+ },
+ {
+  "id": "busiest_hour_place_07",
+  "question": "Which hour on September 24 had the most vessels in Malmö?",
+  "tags": [
+   "busiest_hour_place",
+   "new_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc FROM vessel_positions\nWHERE date = DATE '2026-09-24' AND lon BETWEEN 12.982 AND 13.038 AND lat BETWEEN 55.608 AND 55.64\nGROUP BY 1 ORDER BY count(DISTINCT mmsi) DESC, hour_utc LIMIT 1"
+ },
+ {
+  "id": "busiest_hour_place_08",
+  "question": "Which hour on September 24 had the most vessels in Odense?",
+  "tags": [
+   "busiest_hour_place",
+   "new_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc FROM vessel_positions\nWHERE date = DATE '2026-09-24' AND lon BETWEEN 10.376 AND 10.543 AND lat BETWEEN 55.411 AND 55.475\nGROUP BY 1 ORDER BY count(DISTINCT mmsi) DESC, hour_utc LIMIT 1"
+ },
+ {
+  "id": "busiest_hour_place_09",
+  "question": "Which hour on September 24 had the most vessels in the Kattegat?",
+  "tags": [
+   "busiest_hour_place",
+   "original_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc FROM vessel_positions\nWHERE date = DATE '2026-09-24' AND lon BETWEEN 10.50 AND 12.50 AND lat BETWEEN 56.00 AND 57.60\nGROUP BY 1 ORDER BY count(DISTINCT mmsi) DESC, hour_utc LIMIT 1"
+ },
+ {
+  "id": "busiest_hour_place_10",
+  "question": "Which hour on 22 September 2026 had the most vessels in Esbjerg?",
+  "tags": [
+   "busiest_hour_place",
+   "original_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc FROM vessel_positions\nWHERE date = DATE '2026-09-22' AND lon BETWEEN 8.40 AND 8.47 AND lat BETWEEN 55.44 AND 55.49\nGROUP BY 1 ORDER BY count(DISTINCT mmsi) DESC, hour_utc LIMIT 1"
+ },
+ {
+  "id": "busiest_hour_place_11",
+  "question": "Which hour on 23 September had the most vessels in Copenhagen?",
+  "tags": [
+   "busiest_hour_place",
+   "original_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc FROM vessel_positions\nWHERE date = DATE '2026-09-23' AND lon BETWEEN 12.53 AND 12.66 AND lat BETWEEN 55.64 AND 55.73\nGROUP BY 1 ORDER BY count(DISTINCT mmsi) DESC, hour_utc LIMIT 1"
+ },
+ {
+  "id": "busiest_hour_place_12",
+  "question": "Which hour on 22 September 2026 had the most vessels in the Kattegat?",
+  "tags": [
+   "busiest_hour_place",
+   "original_place"
+  ],
+  "sql": "SELECT hour(ts) AS hour_utc FROM vessel_positions\nWHERE date = DATE '2026-09-22' AND lon BETWEEN 10.50 AND 12.50 AND lat BETWEEN 56.00 AND 57.60\nGROUP BY 1 ORDER BY count(DISTINCT mmsi) DESC, hour_utc LIMIT 1"
+ },
+ {
+  "id": "avg_speed_type_place_01",
+  "question": "What was the average speed of pleasure craft underway in Kiel on 22 September 2026?",
+  "tags": [
+   "avg_speed_type_place",
+   "new_place"
+  ],
+  "sql": "SELECT avg(sog) AS avg_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-22' AND ship_type = 'Pleasure' AND sog >= 1\n  AND lon BETWEEN 10.116 AND 10.184 AND lat BETWEEN 54.311 AND 54.39"
+ },
+ {
+  "id": "avg_speed_type_place_02",
+  "question": "What was the average speed of fishing vessels underway in the Skagerrak on 24 September 2026?",
+  "tags": [
+   "avg_speed_type_place",
+   "new_place"
+  ],
+  "sql": "SELECT avg(sog) AS avg_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-24' AND ship_type = 'Fishing' AND sog >= 1\n  AND lon BETWEEN 8.00 AND 10.60 AND lat BETWEEN 57.30 AND 59.00"
+ },
+ {
+  "id": "avg_speed_type_place_03",
+  "question": "What was the average speed of tugs underway in Bremerhaven on September 23?",
+  "tags": [
+   "avg_speed_type_place",
+   "new_place"
+  ],
+  "sql": "SELECT avg(sog) AS avg_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-23' AND ship_type = 'Tug' AND sog >= 1\n  AND lon BETWEEN 8.506 AND 8.59 AND lat BETWEEN 53.496 AND 53.605"
+ },
+ {
+  "id": "avg_speed_type_place_04",
+  "question": "What was the average speed of passenger ships underway in Landskrona on 23 September?",
+  "tags": [
+   "avg_speed_type_place",
+   "new_place"
+  ],
+  "sql": "SELECT avg(sog) AS avg_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-23' AND ship_type = 'Passenger' AND sog >= 1\n  AND lon BETWEEN 12.821 AND 12.854 AND lat BETWEEN 55.851 AND 55.871"
+ },
+ {
+  "id": "avg_speed_type_place_05",
+  "question": "What was the average speed of sailing vessels underway in the Little Belt on 24 September?",
+  "tags": [
+   "avg_speed_type_place",
+   "new_place"
+  ],
+  "sql": "SELECT avg(sog) AS avg_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-24' AND ship_type = 'Sailing' AND sog >= 1\n  AND lon BETWEEN 9.55 AND 10.05 AND lat BETWEEN 54.90 AND 55.65"
+ },
+ {
+  "id": "avg_speed_type_place_06",
+  "question": "What was the average speed of cargo ships underway in Rostock on September 22?",
+  "tags": [
+   "avg_speed_type_place",
+   "new_place"
+  ],
+  "sql": "SELECT avg(sog) AS avg_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-22' AND ship_type = 'Cargo' AND sog >= 1\n  AND lon BETWEEN 12.083 AND 12.135 AND lat BETWEEN 54.095 AND 54.166"
+ },
+ {
+  "id": "avg_speed_type_place_07",
+  "question": "What was the average speed of cargo ships underway in Bremerhaven on September 23?",
+  "tags": [
+   "avg_speed_type_place",
+   "new_place"
+  ],
+  "sql": "SELECT avg(sog) AS avg_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-23' AND ship_type = 'Cargo' AND sog >= 1\n  AND lon BETWEEN 8.506 AND 8.59 AND lat BETWEEN 53.496 AND 53.605"
+ },
+ {
+  "id": "avg_speed_type_place_08",
+  "question": "What was the average speed of tankers underway in the Arkona Basin on 23 September?",
+  "tags": [
+   "avg_speed_type_place",
+   "new_place"
+  ],
+  "sql": "SELECT avg(sog) AS avg_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-23' AND ship_type = 'Tanker' AND sog >= 1\n  AND lon BETWEEN 12.50 AND 14.50 AND lat BETWEEN 54.50 AND 55.30"
+ },
+ {
+  "id": "avg_speed_type_place_09",
+  "question": "What was the average speed of fishing vessels underway in Copenhagen on 24 September 2026?",
+  "tags": [
+   "avg_speed_type_place",
+   "original_place"
+  ],
+  "sql": "SELECT avg(sog) AS avg_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-24' AND ship_type = 'Fishing' AND sog >= 1\n  AND lon BETWEEN 12.53 AND 12.66 AND lat BETWEEN 55.64 AND 55.73"
+ },
+ {
+  "id": "avg_speed_type_place_10",
+  "question": "What was the average speed of fishing vessels underway in the Øresund on 23 September?",
+  "tags": [
+   "avg_speed_type_place",
+   "original_place"
+  ],
+  "sql": "SELECT avg(sog) AS avg_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-23' AND ship_type = 'Fishing' AND sog >= 1\n  AND lon BETWEEN 12.40 AND 12.95 AND lat BETWEEN 55.50 AND 56.15"
+ },
+ {
+  "id": "avg_speed_type_place_11",
+  "question": "What was the average speed of pilot vessels underway in the Øresund on 22 September?",
+  "tags": [
+   "avg_speed_type_place",
+   "original_place"
+  ],
+  "sql": "SELECT avg(sog) AS avg_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-22' AND ship_type = 'Pilot' AND sog >= 1\n  AND lon BETWEEN 12.40 AND 12.95 AND lat BETWEEN 55.50 AND 56.15"
+ },
+ {
+  "id": "avg_speed_type_place_12",
+  "question": "What was the average speed of pleasure craft underway in Frederikshavn on 23 September 2026?",
+  "tags": [
+   "avg_speed_type_place",
+   "original_place"
+  ],
+  "sql": "SELECT avg(sog) AS avg_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-23' AND ship_type = 'Pleasure' AND sog >= 1\n  AND lon BETWEEN 10.52 AND 10.60 AND lat BETWEEN 57.42 AND 57.45"
+ },
+ {
+  "id": "fastest_vessel_place_01",
+  "question": "Which vessel reported the highest speed in the Smålandsfarvandet on 24 September?",
+  "tags": [
+   "fastest_vessel_place",
+   "new_place"
+  ],
+  "sql": "SELECT mmsi, max(sog) AS max_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-24' AND sog IS NOT NULL AND lon BETWEEN 11.20 AND 12.00 AND lat BETWEEN 54.90 AND 55.30\nGROUP BY mmsi ORDER BY max_sog_kn DESC, mmsi LIMIT 1"
+ },
+ {
+  "id": "fastest_vessel_place_02",
+  "question": "Which vessel reported the highest speed in Halmstad on September 24?",
+  "tags": [
+   "fastest_vessel_place",
+   "new_place"
+  ],
+  "sql": "SELECT mmsi, max(sog) AS max_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-24' AND sog IS NOT NULL AND lon BETWEEN 12.84 AND 12.862 AND lat BETWEEN 56.646 AND 56.671\nGROUP BY mmsi ORDER BY max_sog_kn DESC, mmsi LIMIT 1"
+ },
+ {
+  "id": "fastest_vessel_place_03",
+  "question": "Which vessel reported the highest speed in Rønne on September 24?",
+  "tags": [
+   "fastest_vessel_place",
+   "new_place"
+  ],
+  "sql": "SELECT mmsi, max(sog) AS max_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-24' AND sog IS NOT NULL AND lon BETWEEN 14.678 AND 14.704 AND lat BETWEEN 55.083 AND 55.107\nGROUP BY mmsi ORDER BY max_sog_kn DESC, mmsi LIMIT 1"
+ },
+ {
+  "id": "fastest_vessel_place_04",
+  "question": "Which vessel reported the highest speed in the Little Belt on September 23?",
+  "tags": [
+   "fastest_vessel_place",
+   "new_place"
+  ],
+  "sql": "SELECT mmsi, max(sog) AS max_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-23' AND sog IS NOT NULL AND lon BETWEEN 9.55 AND 10.05 AND lat BETWEEN 54.90 AND 55.65\nGROUP BY mmsi ORDER BY max_sog_kn DESC, mmsi LIMIT 1"
+ },
+ {
+  "id": "fastest_vessel_place_05",
+  "question": "Which vessel reported the highest speed in the Great Belt on 22 September?",
+  "tags": [
+   "fastest_vessel_place",
+   "new_place"
+  ],
+  "sql": "SELECT mmsi, max(sog) AS max_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-22' AND sog IS NOT NULL AND lon BETWEEN 10.70 AND 11.30 AND lat BETWEEN 54.90 AND 55.80\nGROUP BY mmsi ORDER BY max_sog_kn DESC, mmsi LIMIT 1"
+ },
+ {
+  "id": "fastest_vessel_place_06",
+  "question": "Which vessel reported the highest speed in Hamburg on 22 September?",
+  "tags": [
+   "fastest_vessel_place",
+   "new_place"
+  ],
+  "sql": "SELECT mmsi, max(sog) AS max_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-22' AND sog IS NOT NULL AND lon BETWEEN 9.901 AND 9.973 AND lat BETWEEN 53.485 AND 53.546\nGROUP BY mmsi ORDER BY max_sog_kn DESC, mmsi LIMIT 1"
+ },
+ {
+  "id": "fastest_vessel_place_07",
+  "question": "Which vessel reported the highest speed in Malmö on 24 September?",
+  "tags": [
+   "fastest_vessel_place",
+   "new_place"
+  ],
+  "sql": "SELECT mmsi, max(sog) AS max_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-24' AND sog IS NOT NULL AND lon BETWEEN 12.982 AND 13.038 AND lat BETWEEN 55.608 AND 55.64\nGROUP BY mmsi ORDER BY max_sog_kn DESC, mmsi LIMIT 1"
+ },
+ {
+  "id": "fastest_vessel_place_08",
+  "question": "Which vessel reported the highest speed in the Great Belt on 24 September?",
+  "tags": [
+   "fastest_vessel_place",
+   "new_place"
+  ],
+  "sql": "SELECT mmsi, max(sog) AS max_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-24' AND sog IS NOT NULL AND lon BETWEEN 10.70 AND 11.30 AND lat BETWEEN 54.90 AND 55.80\nGROUP BY mmsi ORDER BY max_sog_kn DESC, mmsi LIMIT 1"
+ },
+ {
+  "id": "fastest_vessel_place_09",
+  "question": "Which vessel reported the highest speed in Aarhus on 22 September?",
+  "tags": [
+   "fastest_vessel_place",
+   "original_place"
+  ],
+  "sql": "SELECT mmsi, max(sog) AS max_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-22' AND sog IS NOT NULL AND lon BETWEEN 10.20 AND 10.27 AND lat BETWEEN 56.13 AND 56.17\nGROUP BY mmsi ORDER BY max_sog_kn DESC, mmsi LIMIT 1"
+ },
+ {
+  "id": "fastest_vessel_place_10",
+  "question": "Which vessel reported the highest speed in Aarhus on September 22?",
+  "tags": [
+   "fastest_vessel_place",
+   "original_place"
+  ],
+  "sql": "SELECT mmsi, max(sog) AS max_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-22' AND sog IS NOT NULL AND lon BETWEEN 10.20 AND 10.27 AND lat BETWEEN 56.13 AND 56.17\nGROUP BY mmsi ORDER BY max_sog_kn DESC, mmsi LIMIT 1"
+ },
+ {
+  "id": "fastest_vessel_place_11",
+  "question": "Which vessel reported the highest speed in the Øresund on 22 September?",
+  "tags": [
+   "fastest_vessel_place",
+   "original_place"
+  ],
+  "sql": "SELECT mmsi, max(sog) AS max_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-22' AND sog IS NOT NULL AND lon BETWEEN 12.40 AND 12.95 AND lat BETWEEN 55.50 AND 56.15\nGROUP BY mmsi ORDER BY max_sog_kn DESC, mmsi LIMIT 1"
+ },
+ {
+  "id": "fastest_vessel_place_12",
+  "question": "Which vessel reported the highest speed in Skagen on 23 September?",
+  "tags": [
+   "fastest_vessel_place",
+   "original_place"
+  ],
+  "sql": "SELECT mmsi, max(sog) AS max_sog_kn FROM vessel_positions\nWHERE date = DATE '2026-09-23' AND sog IS NOT NULL AND lon BETWEEN 10.55 AND 10.65 AND lat BETWEEN 57.70 AND 57.74\nGROUP BY mmsi ORDER BY max_sog_kn DESC, mmsi LIMIT 1"
+ },
+ {
+  "id": "status_at_time_place_01",
+  "question": "How many vessels in the Fehmarn Belt were at anchor at 04:00 UTC on 23 September 2026?",
+  "tags": [
+   "status_at_time_place",
+   "new_place"
+  ],
+  "sql": "SELECT count(*) AS vessels FROM (\n  SELECT mmsi, arg_max(nav_status, ts) AS nav_status FROM vessel_positions\n  WHERE date = DATE '2026-09-23' AND lon BETWEEN 10.95 AND 11.60 AND lat BETWEEN 54.40 AND 54.70\n    AND ts > TIMESTAMP '2026-09-23 04:00:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-23 04:00:00'\n  GROUP BY mmsi\n) WHERE nav_status = 'At anchor'"
+ },
+ {
+  "id": "status_at_time_place_02",
+  "question": "How many vessels in the Isefjord were moored at 14:00 UTC on September 23?",
+  "tags": [
+   "status_at_time_place",
+   "new_place"
+  ],
+  "sql": "SELECT count(*) AS vessels FROM (\n  SELECT mmsi, arg_max(nav_status, ts) AS nav_status FROM vessel_positions\n  WHERE date = DATE '2026-09-23' AND lon BETWEEN 11.65 AND 11.95 AND lat BETWEEN 55.70 AND 55.98\n    AND ts > TIMESTAMP '2026-09-23 14:00:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-23 14:00:00'\n  GROUP BY mmsi\n) WHERE nav_status = 'Moored'"
+ },
+ {
+  "id": "status_at_time_place_03",
+  "question": "How many vessels in the Arkona Basin were at anchor at 02:00 UTC on September 24?",
+  "tags": [
+   "status_at_time_place",
+   "new_place"
+  ],
+  "sql": "SELECT count(*) AS vessels FROM (\n  SELECT mmsi, arg_max(nav_status, ts) AS nav_status FROM vessel_positions\n  WHERE date = DATE '2026-09-24' AND lon BETWEEN 12.50 AND 14.50 AND lat BETWEEN 54.50 AND 55.30\n    AND ts > TIMESTAMP '2026-09-24 02:00:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-24 02:00:00'\n  GROUP BY mmsi\n) WHERE nav_status = 'At anchor'"
+ },
+ {
+  "id": "status_at_time_place_04",
+  "question": "How many vessels in Malmö were moored at 05:00 UTC on September 22?",
+  "tags": [
+   "status_at_time_place",
+   "new_place"
+  ],
+  "sql": "SELECT count(*) AS vessels FROM (\n  SELECT mmsi, arg_max(nav_status, ts) AS nav_status FROM vessel_positions\n  WHERE date = DATE '2026-09-22' AND lon BETWEEN 12.982 AND 13.038 AND lat BETWEEN 55.608 AND 55.64\n    AND ts > TIMESTAMP '2026-09-22 05:00:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-22 05:00:00'\n  GROUP BY mmsi\n) WHERE nav_status = 'Moored'"
+ },
+ {
+  "id": "status_at_time_place_05",
+  "question": "How many vessels in Grenaa were moored at 08:00 UTC on 22 September?",
+  "tags": [
+   "status_at_time_place",
+   "new_place"
+  ],
+  "sql": "SELECT count(*) AS vessels FROM (\n  SELECT mmsi, arg_max(nav_status, ts) AS nav_status FROM vessel_positions\n  WHERE date = DATE '2026-09-22' AND lon BETWEEN 10.918 AND 10.938 AND lat BETWEEN 56.401 AND 56.425\n    AND ts > TIMESTAMP '2026-09-22 08:00:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-22 08:00:00'\n  GROUP BY mmsi\n) WHERE nav_status = 'Moored'"
+ },
+ {
+  "id": "status_at_time_place_06",
+  "question": "How many vessels in the Limfjord were moored at 07:00 UTC on September 23?",
+  "tags": [
+   "status_at_time_place",
+   "new_place"
+  ],
+  "sql": "SELECT count(*) AS vessels FROM (\n  SELECT mmsi, arg_max(nav_status, ts) AS nav_status FROM vessel_positions\n  WHERE date = DATE '2026-09-23' AND lon BETWEEN 8.20 AND 10.40 AND lat BETWEEN 56.40 AND 57.10\n    AND ts > TIMESTAMP '2026-09-23 07:00:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-23 07:00:00'\n  GROUP BY mmsi\n) WHERE nav_status = 'Moored'"
+ },
+ {
+  "id": "status_at_time_place_07",
+  "question": "How many vessels in the Danish North Sea were moored at 01:00 UTC on September 22?",
+  "tags": [
+   "status_at_time_place",
+   "new_place"
+  ],
+  "sql": "SELECT count(*) AS vessels FROM (\n  SELECT mmsi, arg_max(nav_status, ts) AS nav_status FROM vessel_positions\n  WHERE date = DATE '2026-09-22' AND lon BETWEEN 4.00 AND 8.50 AND lat BETWEEN 55.00 AND 57.50\n    AND ts > TIMESTAMP '2026-09-22 01:00:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-22 01:00:00'\n  GROUP BY mmsi\n) WHERE nav_status = 'Moored'"
+ },
+ {
+  "id": "status_at_time_place_08",
+  "question": "How many vessels in Åbenrå were moored at 10:00 UTC on September 23?",
+  "tags": [
+   "status_at_time_place",
+   "new_place"
+  ],
+  "sql": "SELECT count(*) AS vessels FROM (\n  SELECT mmsi, arg_max(nav_status, ts) AS nav_status FROM vessel_positions\n  WHERE date = DATE '2026-09-23' AND lon BETWEEN 9.42 AND 9.448 AND lat BETWEEN 55.022 AND 55.049\n    AND ts > TIMESTAMP '2026-09-23 10:00:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-23 10:00:00'\n  GROUP BY mmsi\n) WHERE nav_status = 'Moored'"
+ },
+ {
+  "id": "status_at_time_place_09",
+  "question": "How many vessels in the Øresund were moored at 05:00 UTC on 24 September?",
+  "tags": [
+   "status_at_time_place",
+   "original_place"
+  ],
+  "sql": "SELECT count(*) AS vessels FROM (\n  SELECT mmsi, arg_max(nav_status, ts) AS nav_status FROM vessel_positions\n  WHERE date = DATE '2026-09-24' AND lon BETWEEN 12.40 AND 12.95 AND lat BETWEEN 55.50 AND 56.15\n    AND ts > TIMESTAMP '2026-09-24 05:00:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-24 05:00:00'\n  GROUP BY mmsi\n) WHERE nav_status = 'Moored'"
+ },
+ {
+  "id": "status_at_time_place_10",
+  "question": "How many vessels in Aarhus were moored at 02:00 UTC on 24 September?",
+  "tags": [
+   "status_at_time_place",
+   "original_place"
+  ],
+  "sql": "SELECT count(*) AS vessels FROM (\n  SELECT mmsi, arg_max(nav_status, ts) AS nav_status FROM vessel_positions\n  WHERE date = DATE '2026-09-24' AND lon BETWEEN 10.20 AND 10.27 AND lat BETWEEN 56.13 AND 56.17\n    AND ts > TIMESTAMP '2026-09-24 02:00:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-24 02:00:00'\n  GROUP BY mmsi\n) WHERE nav_status = 'Moored'"
+ },
+ {
+  "id": "status_at_time_place_11",
+  "question": "How many vessels in Skagen were at anchor at 02:00 UTC on 24 September 2026?",
+  "tags": [
+   "status_at_time_place",
+   "original_place"
+  ],
+  "sql": "SELECT count(*) AS vessels FROM (\n  SELECT mmsi, arg_max(nav_status, ts) AS nav_status FROM vessel_positions\n  WHERE date = DATE '2026-09-24' AND lon BETWEEN 10.55 AND 10.65 AND lat BETWEEN 57.70 AND 57.74\n    AND ts > TIMESTAMP '2026-09-24 02:00:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-24 02:00:00'\n  GROUP BY mmsi\n) WHERE nav_status = 'At anchor'"
+ },
+ {
+  "id": "status_at_time_place_12",
+  "question": "How many vessels in Frederikshavn were moored at 04:00 UTC on 24 September 2026?",
+  "tags": [
+   "status_at_time_place",
+   "original_place"
+  ],
+  "sql": "SELECT count(*) AS vessels FROM (\n  SELECT mmsi, arg_max(nav_status, ts) AS nav_status FROM vessel_positions\n  WHERE date = DATE '2026-09-24' AND lon BETWEEN 10.52 AND 10.60 AND lat BETWEEN 57.42 AND 57.45\n    AND ts > TIMESTAMP '2026-09-24 04:00:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-24 04:00:00'\n  GROUP BY mmsi\n) WHERE nav_status = 'Moored'"
+ },
+ {
+  "id": "closest_pair_place_01",
+  "question": "Which two moving vessels came closest to each other in the Bornholm waters between 13:00 and 13:10 UTC on 24 September 2026?",
+  "tags": [
+   "closest_pair_place",
+   "new_place"
+  ],
+  "sql": "WITH m AS (\n  SELECT mmsi, date_trunc('minute', ts) AS minute,\n         arg_max(lat, ts) AS lat, arg_max(lon, ts) AS lon, arg_max(sog, ts) AS sog\n  FROM vessel_positions\n  WHERE date = DATE '2026-09-24' AND ts >= TIMESTAMP '2026-09-24 13:00:00' AND ts < TIMESTAMP '2026-09-24 13:10:00'\n    AND lon BETWEEN 14.50 AND 15.40 AND lat BETWEEN 54.85 AND 55.45\n  GROUP BY 1, 2\n)\nSELECT a.mmsi AS mmsi_a, b.mmsi AS mmsi_b\nFROM m a JOIN m b ON a.minute = b.minute AND a.mmsi < b.mmsi\nWHERE a.sog >= 1 AND b.sog >= 1\nGROUP BY 1, 2\nORDER BY min(haversine_m(a.lat, a.lon, b.lat, b.lon)), mmsi_a, mmsi_b LIMIT 1"
+ },
+ {
+  "id": "closest_pair_place_02",
+  "question": "Which two moving vessels came closest to each other in the Fehmarn Belt between 21:00 and 21:10 UTC on 23 September 2026?",
+  "tags": [
+   "closest_pair_place",
+   "new_place"
+  ],
+  "sql": "WITH m AS (\n  SELECT mmsi, date_trunc('minute', ts) AS minute,\n         arg_max(lat, ts) AS lat, arg_max(lon, ts) AS lon, arg_max(sog, ts) AS sog\n  FROM vessel_positions\n  WHERE date = DATE '2026-09-23' AND ts >= TIMESTAMP '2026-09-23 21:00:00' AND ts < TIMESTAMP '2026-09-23 21:10:00'\n    AND lon BETWEEN 10.95 AND 11.60 AND lat BETWEEN 54.40 AND 54.70\n  GROUP BY 1, 2\n)\nSELECT a.mmsi AS mmsi_a, b.mmsi AS mmsi_b\nFROM m a JOIN m b ON a.minute = b.minute AND a.mmsi < b.mmsi\nWHERE a.sog >= 1 AND b.sog >= 1\nGROUP BY 1, 2\nORDER BY min(haversine_m(a.lat, a.lon, b.lat, b.lon)), mmsi_a, mmsi_b LIMIT 1"
+ },
+ {
+  "id": "closest_pair_place_03",
+  "question": "Which two moving vessels came closest to each other in the Great Belt between 08:00 and 08:10 UTC on September 23?",
+  "tags": [
+   "closest_pair_place",
+   "new_place"
+  ],
+  "sql": "WITH m AS (\n  SELECT mmsi, date_trunc('minute', ts) AS minute,\n         arg_max(lat, ts) AS lat, arg_max(lon, ts) AS lon, arg_max(sog, ts) AS sog\n  FROM vessel_positions\n  WHERE date = DATE '2026-09-23' AND ts >= TIMESTAMP '2026-09-23 08:00:00' AND ts < TIMESTAMP '2026-09-23 08:10:00'\n    AND lon BETWEEN 10.70 AND 11.30 AND lat BETWEEN 54.90 AND 55.80\n  GROUP BY 1, 2\n)\nSELECT a.mmsi AS mmsi_a, b.mmsi AS mmsi_b\nFROM m a JOIN m b ON a.minute = b.minute AND a.mmsi < b.mmsi\nWHERE a.sog >= 1 AND b.sog >= 1\nGROUP BY 1, 2\nORDER BY min(haversine_m(a.lat, a.lon, b.lat, b.lon)), mmsi_a, mmsi_b LIMIT 1"
+ },
+ {
+  "id": "closest_pair_place_04",
+  "question": "Which two moving vessels came closest to each other in the Skagerrak between 20:00 and 20:10 UTC on September 22?",
+  "tags": [
+   "closest_pair_place",
+   "new_place"
+  ],
+  "sql": "WITH m AS (\n  SELECT mmsi, date_trunc('minute', ts) AS minute,\n         arg_max(lat, ts) AS lat, arg_max(lon, ts) AS lon, arg_max(sog, ts) AS sog\n  FROM vessel_positions\n  WHERE date = DATE '2026-09-22' AND ts >= TIMESTAMP '2026-09-22 20:00:00' AND ts < TIMESTAMP '2026-09-22 20:10:00'\n    AND lon BETWEEN 8.00 AND 10.60 AND lat BETWEEN 57.30 AND 59.00\n  GROUP BY 1, 2\n)\nSELECT a.mmsi AS mmsi_a, b.mmsi AS mmsi_b\nFROM m a JOIN m b ON a.minute = b.minute AND a.mmsi < b.mmsi\nWHERE a.sog >= 1 AND b.sog >= 1\nGROUP BY 1, 2\nORDER BY min(haversine_m(a.lat, a.lon, b.lat, b.lon)), mmsi_a, mmsi_b LIMIT 1"
+ },
+ {
+  "id": "closest_pair_place_05",
+  "question": "Which two moving vessels came closest to each other in Rostock between 18:00 and 18:10 UTC on 23 September?",
+  "tags": [
+   "closest_pair_place",
+   "new_place"
+  ],
+  "sql": "WITH m AS (\n  SELECT mmsi, date_trunc('minute', ts) AS minute,\n         arg_max(lat, ts) AS lat, arg_max(lon, ts) AS lon, arg_max(sog, ts) AS sog\n  FROM vessel_positions\n  WHERE date = DATE '2026-09-23' AND ts >= TIMESTAMP '2026-09-23 18:00:00' AND ts < TIMESTAMP '2026-09-23 18:10:00'\n    AND lon BETWEEN 12.083 AND 12.135 AND lat BETWEEN 54.095 AND 54.166\n  GROUP BY 1, 2\n)\nSELECT a.mmsi AS mmsi_a, b.mmsi AS mmsi_b\nFROM m a JOIN m b ON a.minute = b.minute AND a.mmsi < b.mmsi\nWHERE a.sog >= 1 AND b.sog >= 1\nGROUP BY 1, 2\nORDER BY min(haversine_m(a.lat, a.lon, b.lat, b.lon)), mmsi_a, mmsi_b LIMIT 1"
+ },
+ {
+  "id": "closest_pair_place_06",
+  "question": "Which two moving vessels came closest to each other in Cuxhaven between 11:00 and 11:10 UTC on 23 September?",
+  "tags": [
+   "closest_pair_place",
+   "new_place"
+  ],
+  "sql": "WITH m AS (\n  SELECT mmsi, date_trunc('minute', ts) AS minute,\n         arg_max(lat, ts) AS lat, arg_max(lon, ts) AS lon, arg_max(sog, ts) AS sog\n  FROM vessel_positions\n  WHERE date = DATE '2026-09-23' AND ts >= TIMESTAMP '2026-09-23 11:00:00' AND ts < TIMESTAMP '2026-09-23 11:10:00'\n    AND lon BETWEEN 8.698 AND 8.751 AND lat BETWEEN 53.846 AND 53.88\n  GROUP BY 1, 2\n)\nSELECT a.mmsi AS mmsi_a, b.mmsi AS mmsi_b\nFROM m a JOIN m b ON a.minute = b.minute AND a.mmsi < b.mmsi\nWHERE a.sog >= 1 AND b.sog >= 1\nGROUP BY 1, 2\nORDER BY min(haversine_m(a.lat, a.lon, b.lat, b.lon)), mmsi_a, mmsi_b LIMIT 1"
+ },
+ {
+  "id": "closest_pair_place_07",
+  "question": "Which two moving vessels came closest to each other in the Isefjord between 09:00 and 09:10 UTC on 22 September?",
+  "tags": [
+   "closest_pair_place",
+   "new_place"
+  ],
+  "sql": "WITH m AS (\n  SELECT mmsi, date_trunc('minute', ts) AS minute,\n         arg_max(lat, ts) AS lat, arg_max(lon, ts) AS lon, arg_max(sog, ts) AS sog\n  FROM vessel_positions\n  WHERE date = DATE '2026-09-22' AND ts >= TIMESTAMP '2026-09-22 09:00:00' AND ts < TIMESTAMP '2026-09-22 09:10:00'\n    AND lon BETWEEN 11.65 AND 11.95 AND lat BETWEEN 55.70 AND 55.98\n  GROUP BY 1, 2\n)\nSELECT a.mmsi AS mmsi_a, b.mmsi AS mmsi_b\nFROM m a JOIN m b ON a.minute = b.minute AND a.mmsi < b.mmsi\nWHERE a.sog >= 1 AND b.sog >= 1\nGROUP BY 1, 2\nORDER BY min(haversine_m(a.lat, a.lon, b.lat, b.lon)), mmsi_a, mmsi_b LIMIT 1"
+ },
+ {
+  "id": "closest_pair_place_08",
+  "question": "Which two moving vessels came closest to each other in the Skagerrak between 17:00 and 17:10 UTC on September 22?",
+  "tags": [
+   "closest_pair_place",
+   "new_place"
+  ],
+  "sql": "WITH m AS (\n  SELECT mmsi, date_trunc('minute', ts) AS minute,\n         arg_max(lat, ts) AS lat, arg_max(lon, ts) AS lon, arg_max(sog, ts) AS sog\n  FROM vessel_positions\n  WHERE date = DATE '2026-09-22' AND ts >= TIMESTAMP '2026-09-22 17:00:00' AND ts < TIMESTAMP '2026-09-22 17:10:00'\n    AND lon BETWEEN 8.00 AND 10.60 AND lat BETWEEN 57.30 AND 59.00\n  GROUP BY 1, 2\n)\nSELECT a.mmsi AS mmsi_a, b.mmsi AS mmsi_b\nFROM m a JOIN m b ON a.minute = b.minute AND a.mmsi < b.mmsi\nWHERE a.sog >= 1 AND b.sog >= 1\nGROUP BY 1, 2\nORDER BY min(haversine_m(a.lat, a.lon, b.lat, b.lon)), mmsi_a, mmsi_b LIMIT 1"
+ },
+ {
+  "id": "closest_pair_place_09",
+  "question": "Which two moving vessels came closest to each other in Gothenburg between 09:00 and 09:10 UTC on 22 September 2026?",
+  "tags": [
+   "closest_pair_place",
+   "original_place"
+  ],
+  "sql": "WITH m AS (\n  SELECT mmsi, date_trunc('minute', ts) AS minute,\n         arg_max(lat, ts) AS lat, arg_max(lon, ts) AS lon, arg_max(sog, ts) AS sog\n  FROM vessel_positions\n  WHERE date = DATE '2026-09-22' AND ts >= TIMESTAMP '2026-09-22 09:00:00' AND ts < TIMESTAMP '2026-09-22 09:10:00'\n    AND lon BETWEEN 11.60 AND 11.98 AND lat BETWEEN 57.63 AND 57.73\n  GROUP BY 1, 2\n)\nSELECT a.mmsi AS mmsi_a, b.mmsi AS mmsi_b\nFROM m a JOIN m b ON a.minute = b.minute AND a.mmsi < b.mmsi\nWHERE a.sog >= 1 AND b.sog >= 1\nGROUP BY 1, 2\nORDER BY min(haversine_m(a.lat, a.lon, b.lat, b.lon)), mmsi_a, mmsi_b LIMIT 1"
+ },
+ {
+  "id": "closest_pair_place_10",
+  "question": "Which two moving vessels came closest to each other in Gothenburg between 16:00 and 16:10 UTC on September 24?",
+  "tags": [
+   "closest_pair_place",
+   "original_place"
+  ],
+  "sql": "WITH m AS (\n  SELECT mmsi, date_trunc('minute', ts) AS minute,\n         arg_max(lat, ts) AS lat, arg_max(lon, ts) AS lon, arg_max(sog, ts) AS sog\n  FROM vessel_positions\n  WHERE date = DATE '2026-09-24' AND ts >= TIMESTAMP '2026-09-24 16:00:00' AND ts < TIMESTAMP '2026-09-24 16:10:00'\n    AND lon BETWEEN 11.60 AND 11.98 AND lat BETWEEN 57.63 AND 57.73\n  GROUP BY 1, 2\n)\nSELECT a.mmsi AS mmsi_a, b.mmsi AS mmsi_b\nFROM m a JOIN m b ON a.minute = b.minute AND a.mmsi < b.mmsi\nWHERE a.sog >= 1 AND b.sog >= 1\nGROUP BY 1, 2\nORDER BY min(haversine_m(a.lat, a.lon, b.lat, b.lon)), mmsi_a, mmsi_b LIMIT 1"
+ },
+ {
+  "id": "closest_pair_place_11",
+  "question": "Which two moving vessels came closest to each other in Gothenburg between 01:00 and 01:10 UTC on 23 September?",
+  "tags": [
+   "closest_pair_place",
+   "original_place"
+  ],
+  "sql": "WITH m AS (\n  SELECT mmsi, date_trunc('minute', ts) AS minute,\n         arg_max(lat, ts) AS lat, arg_max(lon, ts) AS lon, arg_max(sog, ts) AS sog\n  FROM vessel_positions\n  WHERE date = DATE '2026-09-23' AND ts >= TIMESTAMP '2026-09-23 01:00:00' AND ts < TIMESTAMP '2026-09-23 01:10:00'\n    AND lon BETWEEN 11.60 AND 11.98 AND lat BETWEEN 57.63 AND 57.73\n  GROUP BY 1, 2\n)\nSELECT a.mmsi AS mmsi_a, b.mmsi AS mmsi_b\nFROM m a JOIN m b ON a.minute = b.minute AND a.mmsi < b.mmsi\nWHERE a.sog >= 1 AND b.sog >= 1\nGROUP BY 1, 2\nORDER BY min(haversine_m(a.lat, a.lon, b.lat, b.lon)), mmsi_a, mmsi_b LIMIT 1"
+ },
+ {
+  "id": "closest_pair_place_12",
+  "question": "Which two moving vessels came closest to each other in Esbjerg between 20:00 and 20:10 UTC on September 23?",
+  "tags": [
+   "closest_pair_place",
+   "original_place"
+  ],
+  "sql": "WITH m AS (\n  SELECT mmsi, date_trunc('minute', ts) AS minute,\n         arg_max(lat, ts) AS lat, arg_max(lon, ts) AS lon, arg_max(sog, ts) AS sog\n  FROM vessel_positions\n  WHERE date = DATE '2026-09-23' AND ts >= TIMESTAMP '2026-09-23 20:00:00' AND ts < TIMESTAMP '2026-09-23 20:10:00'\n    AND lon BETWEEN 8.40 AND 8.47 AND lat BETWEEN 55.44 AND 55.49\n  GROUP BY 1, 2\n)\nSELECT a.mmsi AS mmsi_a, b.mmsi AS mmsi_b\nFROM m a JOIN m b ON a.minute = b.minute AND a.mmsi < b.mmsi\nWHERE a.sog >= 1 AND b.sog >= 1\nGROUP BY 1, 2\nORDER BY min(haversine_m(a.lat, a.lon, b.lat, b.lon)), mmsi_a, mmsi_b LIMIT 1"
+ }
+]

@@ -63,9 +63,13 @@ SPEED_POINTS = 30
 MIN_SECONDS = 0.05
 
 
-def load_questions() -> list[dict]:
-    with QUESTIONS_FILE.open("rb") as f:
-        questions = tomllib.load(f)["question"]
+def load_questions(path: Path = QUESTIONS_FILE) -> list[dict]:
+    """Questions from a TOML file ([[question]] tables) or a JSON list (e.g. the place set)."""
+    if path.suffix == ".json":
+        questions = json.loads(path.read_text())
+    else:
+        with path.open("rb") as f:
+            questions = tomllib.load(f)["question"]
     ids = [q["id"] for q in questions]
     if len(ids) != len(set(ids)):
         sys.exit("duplicate question ids")
@@ -214,11 +218,20 @@ def print_points(records: list[dict]) -> None:
           f"(canonical {sum(r['points'] for r in canonical) / len(canonical):.1f}), "
           f"mean F1 {sum(r['f1'] for r in records) / n:.3f}, "
           f"VES {sum(r['ves'] for r in records) / n:.3f}")
+    tags = sorted({t for r in records for t in r["tags"]})
+    for tag in tags:
+        group = [r for r in records if tag in r["tags"]]
+        if len(group) >= 3:
+            ok = sum(r.get("correct") or r.get("answer_ok", False) for r in group)
+            print(f"  {tag:22} {ok:3}/{len(group):<3} correct, "
+                  f"{sum(r['points'] for r in group) / len(group):5.1f} pts")
 
 
-def cmd_answers(_args) -> None:
+def cmd_answers(args) -> None:
+    if args.answers.exists() and not args.overwrite:
+        sys.exit(f"{args.answers} exists; use --overwrite to recompute it")
     answers = {}
-    for q in load_questions():
+    for q in load_questions(args.questions):
         result = run_sql(q["sql"])
         if "error" in result:
             sys.exit(f"{q['id']}: {result['error']}")
@@ -228,8 +241,8 @@ def cmd_answers(_args) -> None:
                 sys.exit(f"{q['id']}: check_sql disagrees: {check.get('rows', check)}")
         answers[q["id"]] = {"columns": result["columns"], "rows": result["rows"]}
         print(f"{q['id']:24} {result['elapsed_seconds']:6.2f}s  {result['rows'][:3]}")
-    ANSWERS_FILE.write_text(json.dumps(answers, indent=1, ensure_ascii=False) + "\n")
-    print(f"wrote {ANSWERS_FILE}")
+    args.answers.write_text(json.dumps(answers, indent=1, ensure_ascii=False) + "\n")
+    print(f"wrote {args.answers}")
 
 
 def cmd_run(args) -> None:
@@ -241,9 +254,9 @@ def cmd_run(args) -> None:
     model = args.model or MODEL_PATH
     context = CONTEXT_FILE.read_text()
     known = places.load(include_learned=False)  # eval must not drift with learned places
-    answers = json.loads(ANSWERS_FILE.read_text())
+    answers = json.loads(args.answers.read_text())
 
-    questions = load_questions()
+    questions = load_questions(args.questions)
     ref_costs = ReferenceCosts(questions, args.repeats)
     records = []
     for q in questions:
@@ -299,8 +312,8 @@ def cmd_agent(args) -> None:
         from planner import run
     else:
         from agent import run
-    answers = json.loads(ANSWERS_FILE.read_text())
-    questions = load_questions()
+    answers = json.loads(args.answers.read_text())
+    questions = load_questions(args.questions)
     ref_costs = ReferenceCosts(questions, args.repeats)
 
     records = []
@@ -376,7 +389,9 @@ def cmd_agent(args) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0].strip())
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("answers", help="compute reference results").set_defaults(func=cmd_answers)
+    answers = sub.add_parser("answers", help="compute reference results")
+    answers.add_argument("--overwrite", action="store_true")
+    answers.set_defaults(func=cmd_answers)
     run = sub.add_parser("run", help="score a model")
     run.add_argument("--model", help="served model name (default: agent.MODEL_PATH)")
     run.add_argument("--base-url", help="OpenAI-compatible URL (default: current endpoint)")
@@ -390,6 +405,11 @@ def main() -> None:
     agent.add_argument("--out", help="write per-question results as JSONL")
     agent.add_argument("--repeats", type=int, default=3, help="timed runs of reference SQL")
     agent.set_defaults(func=cmd_agent)
+    for p in sub.choices.values():
+        p.add_argument("--questions", type=Path, default=QUESTIONS_FILE,
+                       help="question set (TOML or JSON; default eval/questions.toml)")
+        p.add_argument("--answers", type=Path, default=ANSWERS_FILE,
+                       help="its reference answers (default eval/answers.json)")
     args = parser.parse_args()
     args.func(args)
 

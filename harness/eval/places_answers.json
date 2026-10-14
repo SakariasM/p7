@@ -1,0 +1,1934 @@
+{
+ "vessels_place_window_01": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    5
+   ]
+  ]
+ },
+ "vessels_place_window_02": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    1
+   ]
+  ]
+ },
+ "vessels_place_window_03": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    3
+   ]
+  ]
+ },
+ "vessels_place_window_04": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    3
+   ]
+  ]
+ },
+ "vessels_place_window_05": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    8
+   ]
+  ]
+ },
+ "vessels_place_window_06": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    7
+   ]
+  ]
+ },
+ "vessels_place_window_07": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    10
+   ]
+  ]
+ },
+ "vessels_place_window_08": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    1
+   ]
+  ]
+ },
+ "vessels_place_window_09": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    65
+   ]
+  ]
+ },
+ "vessels_place_window_10": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    75
+   ]
+  ]
+ },
+ "vessels_place_window_11": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    6
+   ]
+  ]
+ },
+ "vessels_place_window_12": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    109
+   ]
+  ]
+ },
+ "hourly_counts_place_01": {
+  "columns": [
+   "hour_utc",
+   "vessels"
+  ],
+  "rows": [
+   [
+    0,
+    106
+   ],
+   [
+    1,
+    105
+   ],
+   [
+    2,
+    104
+   ],
+   [
+    3,
+    106
+   ],
+   [
+    4,
+    107
+   ],
+   [
+    5,
+    108
+   ],
+   [
+    6,
+    110
+   ],
+   [
+    7,
+    116
+   ],
+   [
+    8,
+    125
+   ],
+   [
+    9,
+    127
+   ],
+   [
+    10,
+    125
+   ],
+   [
+    11,
+    126
+   ],
+   [
+    12,
+    128
+   ],
+   [
+    13,
+    124
+   ],
+   [
+    14,
+    122
+   ],
+   [
+    15,
+    122
+   ],
+   [
+    16,
+    115
+   ],
+   [
+    17,
+    114
+   ],
+   [
+    18,
+    109
+   ],
+   [
+    19,
+    104
+   ],
+   [
+    20,
+    100
+   ],
+   [
+    21,
+    99
+   ],
+   [
+    22,
+    98
+   ],
+   [
+    23,
+    97
+   ]
+  ]
+ },
+ "hourly_counts_place_02": {
+  "columns": [
+   "hour_utc",
+   "vessels"
+  ],
+  "rows": [
+   [
+    0,
+    113
+   ],
+   [
+    1,
+    108
+   ],
+   [
+    2,
+    111
+   ],
+   [
+    3,
+    116
+   ],
+   [
+    4,
+    119
+   ],
+   [
+    5,
+    146
+   ],
+   [
+    6,
+    149
+   ],
+   [
+    7,
+    149
+   ],
+   [
+    8,
+    145
+   ],
+   [
+    9,
+    145
+   ],
+   [
+    10,
+    147
+   ],
+   [
+    11,
+    144
+   ],
+   [
+    12,
+    138
+   ],
+   [
+    13,
+    134
+   ],
+   [
+    14,
+    138
+   ],
+   [
+    15,
+    136
+   ],
+   [
+    16,
+    140
+   ],
+   [
+    17,
+    130
+   ],
+   [
+    18,
+    116
+   ],
+   [
+    19,
+    110
+   ],
+   [
+    20,
+    108
+   ],
+   [
+    21,
+    110
+   ],
+   [
+    22,
+    110
+   ],
+   [
+    23,
+    111
+   ]
+  ]
+ },
+ "hourly_counts_place_03": {
+  "columns": [
+   "hour_utc",
+   "vessels"
+  ],
+  "rows": [
+   [
+    0,
+    33
+   ],
+   [
+    1,
+    33
+   ],
+   [
+    2,
+    33
+   ],
+   [
+    3,
+    33
+   ],
+   [
+    4,
+    33
+   ],
+   [
+    5,
+    32
+   ],
+   [
+    6,
+    33
+   ],
+   [
+    7,
+    31
+   ],
+   [
+    8,
+    32
+   ],
+   [
+    9,
+    33
+   ],
+   [
+    10,
+    33
+   ],
+   [
+    11,
+    32
+   ],
+   [
+    12,
+    34
+   ],
+   [
+    13,
+    35
+   ],
+   [
+    14,
+    36
+   ],
+   [
+    15,
+    39
+   ],
+   [
+    16,
+    38
+   ],
+   [
+    17,
+    40
+   ],
+   [
+    18,
+    38
+   ],
+   [
+    19,
+    39
+   ],
+   [
+    20,
+    41
+   ],
+   [
+    21,
+    41
+   ],
+   [
+    22,
+    41
+   ],
+   [
+    23,
+    41
+   ]
+  ]
+ },
+ "hourly_counts_place_04": {
+  "columns": [
+   "hour_utc",
+   "vessels"
+  ],
+  "rows": [
+   [
+    0,
+    36
+   ],
+   [
+    1,
+    35
+   ],
+   [
+    2,
+    37
+   ],
+   [
+    3,
+    37
+   ],
+   [
+    4,
+    37
+   ],
+   [
+    5,
+    37
+   ],
+   [
+    6,
+    35
+   ],
+   [
+    7,
+    35
+   ],
+   [
+    8,
+    39
+   ],
+   [
+    9,
+    44
+   ],
+   [
+    10,
+    44
+   ],
+   [
+    11,
+    43
+   ],
+   [
+    12,
+    41
+   ],
+   [
+    13,
+    42
+   ],
+   [
+    14,
+    41
+   ],
+   [
+    15,
+    37
+   ],
+   [
+    16,
+    38
+   ],
+   [
+    17,
+    38
+   ],
+   [
+    18,
+    37
+   ],
+   [
+    19,
+    37
+   ],
+   [
+    20,
+    38
+   ],
+   [
+    21,
+    35
+   ],
+   [
+    22,
+    36
+   ],
+   [
+    23,
+    36
+   ]
+  ]
+ },
+ "hourly_counts_place_05": {
+  "columns": [
+   "hour_utc",
+   "vessels"
+  ],
+  "rows": [
+   [
+    0,
+    36
+   ],
+   [
+    1,
+    37
+   ],
+   [
+    2,
+    34
+   ],
+   [
+    3,
+    35
+   ],
+   [
+    4,
+    35
+   ],
+   [
+    5,
+    36
+   ],
+   [
+    6,
+    35
+   ],
+   [
+    7,
+    39
+   ],
+   [
+    8,
+    40
+   ],
+   [
+    9,
+    40
+   ],
+   [
+    10,
+    42
+   ],
+   [
+    11,
+    41
+   ],
+   [
+    12,
+    41
+   ],
+   [
+    13,
+    38
+   ],
+   [
+    14,
+    39
+   ],
+   [
+    15,
+    39
+   ],
+   [
+    16,
+    39
+   ],
+   [
+    17,
+    39
+   ],
+   [
+    18,
+    38
+   ],
+   [
+    19,
+    38
+   ],
+   [
+    20,
+    37
+   ],
+   [
+    21,
+    37
+   ],
+   [
+    22,
+    36
+   ],
+   [
+    23,
+    36
+   ]
+  ]
+ },
+ "hourly_counts_place_06": {
+  "columns": [
+   "hour_utc",
+   "vessels"
+  ],
+  "rows": [
+   [
+    0,
+    41
+   ],
+   [
+    1,
+    41
+   ],
+   [
+    2,
+    41
+   ],
+   [
+    3,
+    41
+   ],
+   [
+    4,
+    41
+   ],
+   [
+    5,
+    40
+   ],
+   [
+    6,
+    35
+   ],
+   [
+    7,
+    36
+   ],
+   [
+    8,
+    36
+   ],
+   [
+    9,
+    38
+   ],
+   [
+    10,
+    34
+   ],
+   [
+    11,
+    36
+   ],
+   [
+    12,
+    34
+   ],
+   [
+    13,
+    34
+   ],
+   [
+    14,
+    35
+   ],
+   [
+    15,
+    36
+   ],
+   [
+    16,
+    33
+   ],
+   [
+    17,
+    34
+   ],
+   [
+    18,
+    33
+   ],
+   [
+    19,
+    33
+   ],
+   [
+    20,
+    33
+   ],
+   [
+    21,
+    34
+   ],
+   [
+    22,
+    34
+   ],
+   [
+    23,
+    36
+   ]
+  ]
+ },
+ "hourly_counts_place_07": {
+  "columns": [
+   "hour_utc",
+   "vessels"
+  ],
+  "rows": [
+   [
+    0,
+    19
+   ],
+   [
+    1,
+    19
+   ],
+   [
+    2,
+    19
+   ],
+   [
+    3,
+    20
+   ],
+   [
+    4,
+    21
+   ],
+   [
+    5,
+    19
+   ],
+   [
+    6,
+    24
+   ],
+   [
+    7,
+    20
+   ],
+   [
+    8,
+    21
+   ],
+   [
+    9,
+    23
+   ],
+   [
+    10,
+    22
+   ],
+   [
+    11,
+    24
+   ],
+   [
+    12,
+    24
+   ],
+   [
+    13,
+    24
+   ],
+   [
+    14,
+    24
+   ],
+   [
+    15,
+    23
+   ],
+   [
+    16,
+    22
+   ],
+   [
+    17,
+    23
+   ],
+   [
+    18,
+    23
+   ],
+   [
+    19,
+    22
+   ],
+   [
+    20,
+    22
+   ],
+   [
+    21,
+    22
+   ],
+   [
+    22,
+    21
+   ],
+   [
+    23,
+    21
+   ]
+  ]
+ },
+ "hourly_counts_place_08": {
+  "columns": [
+   "hour_utc",
+   "vessels"
+  ],
+  "rows": [
+   [
+    0,
+    2
+   ],
+   [
+    21,
+    2
+   ],
+   [
+    22,
+    1
+   ]
+  ]
+ },
+ "hourly_counts_place_09": {
+  "columns": [
+   "hour_utc",
+   "vessels"
+  ],
+  "rows": [
+   [
+    0,
+    64
+   ],
+   [
+    1,
+    64
+   ],
+   [
+    2,
+    64
+   ],
+   [
+    3,
+    58
+   ],
+   [
+    4,
+    55
+   ],
+   [
+    5,
+    55
+   ],
+   [
+    6,
+    57
+   ],
+   [
+    7,
+    56
+   ],
+   [
+    8,
+    58
+   ],
+   [
+    9,
+    58
+   ],
+   [
+    10,
+    58
+   ],
+   [
+    11,
+    59
+   ],
+   [
+    12,
+    61
+   ],
+   [
+    13,
+    65
+   ],
+   [
+    14,
+    65
+   ],
+   [
+    15,
+    67
+   ],
+   [
+    16,
+    73
+   ],
+   [
+    17,
+    74
+   ],
+   [
+    18,
+    76
+   ],
+   [
+    19,
+    75
+   ],
+   [
+    20,
+    76
+   ],
+   [
+    21,
+    76
+   ],
+   [
+    22,
+    77
+   ],
+   [
+    23,
+    77
+   ]
+  ]
+ },
+ "hourly_counts_place_10": {
+  "columns": [
+   "hour_utc",
+   "vessels"
+  ],
+  "rows": [
+   [
+    0,
+    215
+   ],
+   [
+    1,
+    228
+   ],
+   [
+    2,
+    230
+   ],
+   [
+    3,
+    233
+   ],
+   [
+    4,
+    233
+   ],
+   [
+    5,
+    240
+   ],
+   [
+    6,
+    254
+   ],
+   [
+    7,
+    278
+   ],
+   [
+    8,
+    280
+   ],
+   [
+    9,
+    273
+   ],
+   [
+    10,
+    271
+   ],
+   [
+    11,
+    263
+   ],
+   [
+    12,
+    267
+   ],
+   [
+    13,
+    260
+   ],
+   [
+    14,
+    243
+   ],
+   [
+    15,
+    252
+   ],
+   [
+    16,
+    250
+   ],
+   [
+    17,
+    243
+   ],
+   [
+    18,
+    225
+   ],
+   [
+    19,
+    224
+   ],
+   [
+    20,
+    217
+   ],
+   [
+    21,
+    220
+   ],
+   [
+    22,
+    211
+   ],
+   [
+    23,
+    218
+   ]
+  ]
+ },
+ "hourly_counts_place_11": {
+  "columns": [
+   "hour_utc",
+   "vessels"
+  ],
+  "rows": [
+   [
+    0,
+    6
+   ],
+   [
+    1,
+    5
+   ],
+   [
+    2,
+    3
+   ],
+   [
+    3,
+    3
+   ],
+   [
+    4,
+    4
+   ],
+   [
+    5,
+    4
+   ],
+   [
+    6,
+    4
+   ],
+   [
+    7,
+    3
+   ],
+   [
+    8,
+    6
+   ],
+   [
+    9,
+    11
+   ],
+   [
+    10,
+    11
+   ],
+   [
+    11,
+    6
+   ],
+   [
+    12,
+    7
+   ],
+   [
+    13,
+    6
+   ],
+   [
+    14,
+    4
+   ],
+   [
+    15,
+    5
+   ],
+   [
+    16,
+    6
+   ],
+   [
+    17,
+    4
+   ],
+   [
+    18,
+    4
+   ],
+   [
+    19,
+    6
+   ],
+   [
+    20,
+    5
+   ],
+   [
+    21,
+    5
+   ],
+   [
+    22,
+    4
+   ],
+   [
+    23,
+    4
+   ]
+  ]
+ },
+ "hourly_counts_place_12": {
+  "columns": [
+   "hour_utc",
+   "vessels"
+  ],
+  "rows": [
+   [
+    0,
+    40
+   ],
+   [
+    1,
+    39
+   ],
+   [
+    2,
+    39
+   ],
+   [
+    3,
+    39
+   ],
+   [
+    4,
+    41
+   ],
+   [
+    5,
+    43
+   ],
+   [
+    6,
+    44
+   ],
+   [
+    7,
+    47
+   ],
+   [
+    8,
+    49
+   ],
+   [
+    9,
+    45
+   ],
+   [
+    10,
+    42
+   ],
+   [
+    11,
+    41
+   ],
+   [
+    12,
+    39
+   ],
+   [
+    13,
+    41
+   ],
+   [
+    14,
+    40
+   ],
+   [
+    15,
+    37
+   ],
+   [
+    16,
+    36
+   ],
+   [
+    17,
+    35
+   ],
+   [
+    18,
+    32
+   ],
+   [
+    19,
+    30
+   ],
+   [
+    20,
+    31
+   ],
+   [
+    21,
+    35
+   ],
+   [
+    22,
+    33
+   ],
+   [
+    23,
+    33
+   ]
+  ]
+ },
+ "busiest_hour_place_01": {
+  "columns": [
+   "hour_utc"
+  ],
+  "rows": [
+   [
+    20
+   ]
+  ]
+ },
+ "busiest_hour_place_02": {
+  "columns": [
+   "hour_utc"
+  ],
+  "rows": [
+   [
+    7
+   ]
+  ]
+ },
+ "busiest_hour_place_03": {
+  "columns": [
+   "hour_utc"
+  ],
+  "rows": [
+   [
+    9
+   ]
+  ]
+ },
+ "busiest_hour_place_04": {
+  "columns": [
+   "hour_utc"
+  ],
+  "rows": [
+   [
+    6
+   ]
+  ]
+ },
+ "busiest_hour_place_05": {
+  "columns": [
+   "hour_utc"
+  ],
+  "rows": [
+   [
+    4
+   ]
+  ]
+ },
+ "busiest_hour_place_06": {
+  "columns": [
+   "hour_utc"
+  ],
+  "rows": [
+   [
+    6
+   ]
+  ]
+ },
+ "busiest_hour_place_07": {
+  "columns": [
+   "hour_utc"
+  ],
+  "rows": [
+   [
+    18
+   ]
+  ]
+ },
+ "busiest_hour_place_08": {
+  "columns": [
+   "hour_utc"
+  ],
+  "rows": [
+   [
+    12
+   ]
+  ]
+ },
+ "busiest_hour_place_09": {
+  "columns": [
+   "hour_utc"
+  ],
+  "rows": [
+   [
+    8
+   ]
+  ]
+ },
+ "busiest_hour_place_10": {
+  "columns": [
+   "hour_utc"
+  ],
+  "rows": [
+   [
+    17
+   ]
+  ]
+ },
+ "busiest_hour_place_11": {
+  "columns": [
+   "hour_utc"
+  ],
+  "rows": [
+   [
+    8
+   ]
+  ]
+ },
+ "busiest_hour_place_12": {
+  "columns": [
+   "hour_utc"
+  ],
+  "rows": [
+   [
+    12
+   ]
+  ]
+ },
+ "avg_speed_type_place_01": {
+  "columns": [
+   "avg_sog_kn"
+  ],
+  "rows": [
+   [
+    3.6223557640153627
+   ]
+  ]
+ },
+ "avg_speed_type_place_02": {
+  "columns": [
+   "avg_sog_kn"
+  ],
+  "rows": [
+   [
+    4.171626032135822
+   ]
+  ]
+ },
+ "avg_speed_type_place_03": {
+  "columns": [
+   "avg_sog_kn"
+  ],
+  "rows": [
+   [
+    8.51428575175149
+   ]
+  ]
+ },
+ "avg_speed_type_place_04": {
+  "columns": [
+   "avg_sog_kn"
+  ],
+  "rows": [
+   [
+    4.936896038264865
+   ]
+  ]
+ },
+ "avg_speed_type_place_05": {
+  "columns": [
+   "avg_sog_kn"
+  ],
+  "rows": [
+   [
+    5.143386314019383
+   ]
+  ]
+ },
+ "avg_speed_type_place_06": {
+  "columns": [
+   "avg_sog_kn"
+  ],
+  "rows": [
+   [
+    4.206871526876271
+   ]
+  ]
+ },
+ "avg_speed_type_place_07": {
+  "columns": [
+   "avg_sog_kn"
+  ],
+  "rows": [
+   [
+    6.452268235076814
+   ]
+  ]
+ },
+ "avg_speed_type_place_08": {
+  "columns": [
+   "avg_sog_kn"
+  ],
+  "rows": [
+   [
+    11.199722115726146
+   ]
+  ]
+ },
+ "avg_speed_type_place_09": {
+  "columns": [
+   "avg_sog_kn"
+  ],
+  "rows": [
+   [
+    3.950000011920929
+   ]
+  ]
+ },
+ "avg_speed_type_place_10": {
+  "columns": [
+   "avg_sog_kn"
+  ],
+  "rows": [
+   [
+    1.8257234747195168
+   ]
+  ]
+ },
+ "avg_speed_type_place_11": {
+  "columns": [
+   "avg_sog_kn"
+  ],
+  "rows": [
+   [
+    14.43529568659291
+   ]
+  ]
+ },
+ "avg_speed_type_place_12": {
+  "columns": [
+   "avg_sog_kn"
+  ],
+  "rows": [
+   [
+    6.0242424083478525
+   ]
+  ]
+ },
+ "fastest_vessel_place_01": {
+  "columns": [
+   "mmsi",
+   "max_sog_kn"
+  ],
+  "rows": [
+   [
+    219026899,
+    63.0
+   ]
+  ]
+ },
+ "fastest_vessel_place_02": {
+  "columns": [
+   "mmsi",
+   "max_sog_kn"
+  ],
+  "rows": [
+   [
+    220476000,
+    10.100000381469727
+   ]
+  ]
+ },
+ "fastest_vessel_place_03": {
+  "columns": [
+   "mmsi",
+   "max_sog_kn"
+  ],
+  "rows": [
+   [
+    219018488,
+    30.299999237060547
+   ]
+  ]
+ },
+ "fastest_vessel_place_04": {
+  "columns": [
+   "mmsi",
+   "max_sog_kn"
+  ],
+  "rows": [
+   [
+    211896810,
+    35.400001525878906
+   ]
+  ]
+ },
+ "fastest_vessel_place_05": {
+  "columns": [
+   "mmsi",
+   "max_sog_kn"
+  ],
+  "rows": [
+   [
+    266343000,
+    43.20000076293945
+   ]
+  ]
+ },
+ "fastest_vessel_place_06": {
+  "columns": [
+   "mmsi",
+   "max_sog_kn"
+  ],
+  "rows": [
+   [
+    211589740,
+    18.600000381469727
+   ]
+  ]
+ },
+ "fastest_vessel_place_07": {
+  "columns": [
+   "mmsi",
+   "max_sog_kn"
+  ],
+  "rows": [
+   [
+    265610950,
+    19.399999618530273
+   ]
+  ]
+ },
+ "fastest_vessel_place_08": {
+  "columns": [
+   "mmsi",
+   "max_sog_kn"
+  ],
+  "rows": [
+   [
+    219006091,
+    41.599998474121094
+   ]
+  ]
+ },
+ "fastest_vessel_place_09": {
+  "columns": [
+   "mmsi",
+   "max_sog_kn"
+  ],
+  "rows": [
+   [
+    219026261,
+    23.600000381469727
+   ]
+  ]
+ },
+ "fastest_vessel_place_10": {
+  "columns": [
+   "mmsi",
+   "max_sog_kn"
+  ],
+  "rows": [
+   [
+    219026261,
+    23.600000381469727
+   ]
+  ]
+ },
+ "fastest_vessel_place_11": {
+  "columns": [
+   "mmsi",
+   "max_sog_kn"
+  ],
+  "rows": [
+   [
+    219027064,
+    38.900001525878906
+   ]
+  ]
+ },
+ "fastest_vessel_place_12": {
+  "columns": [
+   "mmsi",
+   "max_sog_kn"
+  ],
+  "rows": [
+   [
+    220068000,
+    21.600000381469727
+   ]
+  ]
+ },
+ "status_at_time_place_01": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    3
+   ]
+  ]
+ },
+ "status_at_time_place_02": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    2
+   ]
+  ]
+ },
+ "status_at_time_place_03": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    2
+   ]
+  ]
+ },
+ "status_at_time_place_04": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    3
+   ]
+  ]
+ },
+ "status_at_time_place_05": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    9
+   ]
+  ]
+ },
+ "status_at_time_place_06": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    25
+   ]
+  ]
+ },
+ "status_at_time_place_07": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    65
+   ]
+  ]
+ },
+ "status_at_time_place_08": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    4
+   ]
+  ]
+ },
+ "status_at_time_place_09": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    27
+   ]
+  ]
+ },
+ "status_at_time_place_10": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    12
+   ]
+  ]
+ },
+ "status_at_time_place_11": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    1
+   ]
+  ]
+ },
+ "status_at_time_place_12": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    10
+   ]
+  ]
+ },
+ "closest_pair_place_01": {
+  "columns": [
+   "mmsi_a",
+   "mmsi_b"
+  ],
+  "rows": [
+   [
+    219004436,
+    261005038
+   ]
+  ]
+ },
+ "closest_pair_place_02": {
+  "columns": [
+   "mmsi_a",
+   "mmsi_b"
+  ],
+  "rows": [
+   [
+    205520000,
+    235090339
+   ]
+  ]
+ },
+ "closest_pair_place_03": {
+  "columns": [
+   "mmsi_a",
+   "mmsi_b"
+  ],
+  "rows": [
+   [
+    219023833,
+    257550000
+   ]
+  ]
+ },
+ "closest_pair_place_04": {
+  "columns": [
+   "mmsi_a",
+   "mmsi_b"
+  ],
+  "rows": [
+   [
+    220182000,
+    266232000
+   ]
+  ]
+ },
+ "closest_pair_place_05": {
+  "columns": [
+   "mmsi_a",
+   "mmsi_b"
+  ],
+  "rows": [
+   [
+    211825200,
+    218054320
+   ]
+  ]
+ },
+ "closest_pair_place_06": {
+  "columns": [
+   "mmsi_a",
+   "mmsi_b"
+  ],
+  "rows": [
+   [
+    211255310,
+    245242000
+   ]
+  ]
+ },
+ "closest_pair_place_07": {
+  "columns": [
+   "mmsi_a",
+   "mmsi_b"
+  ],
+  "rows": [
+   [
+    219011845,
+    219012553
+   ]
+  ]
+ },
+ "closest_pair_place_08": {
+  "columns": [
+   "mmsi_a",
+   "mmsi_b"
+  ],
+  "rows": [
+   [
+    210400000,
+    258257500
+   ]
+  ]
+ },
+ "closest_pair_place_09": {
+  "columns": [
+   "mmsi_a",
+   "mmsi_b"
+  ],
+  "rows": [
+   [
+    265547220,
+    265738540
+   ]
+  ]
+ },
+ "closest_pair_place_10": {
+  "columns": [
+   "mmsi_a",
+   "mmsi_b"
+  ],
+  "rows": [
+   [
+    265547220,
+    265810550
+   ]
+  ]
+ },
+ "closest_pair_place_11": {
+  "columns": [
+   "mmsi_a",
+   "mmsi_b"
+  ],
+  "rows": [
+   [
+    265056000,
+    265522210
+   ]
+  ]
+ },
+ "closest_pair_place_12": {
+  "columns": [
+   "mmsi_a",
+   "mmsi_b"
+  ],
+  "rows": [
+   [
+    219027893,
+    245204000
+   ]
+  ]
+ }
+}
