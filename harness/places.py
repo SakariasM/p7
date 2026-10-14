@@ -4,14 +4,22 @@ student's place list, checking SQL boxes, and places learned at runtime.
 
   places.json                  in the repo, built by build_places.py (manual areas and
                                AIS-located ports)
-  data/places_learned.jsonl    in the project folder, appended by planner.py when the
-                               planner proposes a place that passes validate(); status
-                               "unverified" until someone moves it to places_manual.json
+  data/places_learned.jsonl    in the project folder, append-only: planner.py adds a place
+                               the planner proposed and validate() accepted, as "pending";
+                               it is used only for that question until a person approves
+                               it (python3 places.py pending / approve NAME / reject NAME).
+                               The last record per name counts, so nothing is rewritten.
+
+validate() checks size, coverage and that vessels are there; it cannot tell whether a box is
+geographically right (on 2026-10-14 the planner shrank a "Denmark" box until it passed and
+ended in the Skagerrak), hence the human approval.
 """
 
+import argparse
 import fcntl
 import json
 import re
+import sys
 import time
 import unicodedata
 from dataclasses import dataclass, field
@@ -27,6 +35,11 @@ COVERAGE = (-5.0, 50.0, 32.0, 64.0)  # vessel_positions keeps lon -5..32, lat 50
 MAX_SIDE_DEG = {"port": 0.3, "area": 3.0}
 MIN_SIDE_DEG = 0.002
 MIN_VESSELS = 3  # distinct vessels in the box on the validation days
+# Countries and regions are not places (a box cannot stand for them).
+NOT_PLACES = {"denmark", "danmark", "sweden", "sverige", "norway", "norge", "germany",
+              "deutschland", "poland", "polska", "netherlands", "finland", "scandinavia",
+              "europe", "baltic sea", "north sea", "jutland", "jylland", "zealand", "sjaelland",
+              "funen", "fyn"}
 VALIDATION_DAYS = 3
 
 
@@ -52,26 +65,36 @@ def normalise(text: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9]+", " ", t).split())
 
 
+def learned_records() -> dict[str, dict]:
+    """The latest record per learned place name (the file is append-only)."""
+    if not LEARNED_FILE.exists():
+        return {}
+    with LEARNED_FILE.open() as f:
+        fcntl.flock(f, fcntl.LOCK_SH)
+        lines = f.read().splitlines()
+        fcntl.flock(f, fcntl.LOCK_UN)
+    latest: dict[str, dict] = {}
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:  # a line being written right now
+            continue
+        latest[normalise(record["name"])] = record
+    return latest
+
+
 def load(include_learned: bool = True) -> list[Place]:
-    """places.json, plus the learned places unless include_learned=False. Templates, data
-    generation and eval use only places.json, so their results do not drift as the planner
-    learns places at run time."""
+    """places.json, plus the learned places a person approved unless include_learned=False.
+    Templates, data generation and eval use only places.json, so their results do not drift.
+    Pending places are not loaded; planner.py uses one only for the question that proposed
+    it."""
     places = [
         Place(p["name"], tuple(p["box"]), p["kind"], p.get("aliases", []), p["source"])
         for p in json.loads(PLACES_FILE.read_text())["places"]
     ]
-    if include_learned and LEARNED_FILE.exists():
-        with LEARNED_FILE.open() as f:
-            fcntl.flock(f, fcntl.LOCK_SH)
-            lines = f.read().splitlines()
-            fcntl.flock(f, fcntl.LOCK_UN)
-        for line in lines:
-            try:
-                p = json.loads(line)
-            except json.JSONDecodeError:  # a line being written right now
-                continue
-            places.append(Place(p["name"], tuple(p["box"]), p["kind"], [], "learned",
-                                p.get("status", "unverified")))
+    if include_learned:
+        places += [Place(r["name"], tuple(r["box"]), r["kind"], [], "learned", "approved")
+                   for r in learned_records().values() if r["status"] == "approved"]
     return places
 
 
@@ -147,6 +170,9 @@ def unexplained_boxes(sql: str, places: list[Place], request: str) -> list[tuple
 
 def validate(name: str, kind: str, box: tuple[float, float, float, float]) -> tuple[bool, str]:
     """Is a proposed place plausible? Inside coverage, sensible size, vessels present."""
+    if normalise(name) in NOT_PLACES:
+        return False, (f"{name} is a country or region, not a place with one box; ask about "
+                       "its ports or sea areas instead")
     if kind not in MAX_SIDE_DEG:
         return False, f"kind must be one of {sorted(MAX_SIDE_DEG)}"
     lon0, lat0, lon1, lat1 = box
@@ -174,15 +200,46 @@ def validate(name: str, kind: str, box: tuple[float, float, float, float]) -> tu
     return True, f"{vessels} vessels ({moored} moored) on the last {VALIDATION_DAYS} days"
 
 
-def learn(name: str, kind: str, box: tuple[float, float, float, float], evidence: str,
-          context: str) -> Place:
-    """Append a validated place to LEARNED_FILE (append-only, locked) and return it."""
-    record = {"name": name, "kind": kind, "box": list(box), "status": "unverified",
-              "evidence": evidence, "context": context,
-              "learned_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+def _append(record: dict) -> None:
     LEARNED_FILE.parent.mkdir(parents=True, exist_ok=True)
     with LEARNED_FILE.open("a") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
         fcntl.flock(f, fcntl.LOCK_UN)
-    return Place(name, box, kind, [], "learned", "unverified")
+
+
+def learn(name: str, kind: str, box: tuple[float, float, float, float], evidence: str,
+          context: str) -> Place:
+    """Record a validated proposal as pending (append-only) and return it for this question."""
+    _append({"name": name, "kind": kind, "box": list(box), "status": "pending",
+             "evidence": evidence, "context": context,
+             "at": time.strftime("%Y-%m-%dT%H:%M:%S")})
+    return Place(name, box, kind, [], "learned", "pending")
+
+
+def main() -> None:
+    """Review learned places: list pending ones, approve or reject one by name."""
+    p = argparse.ArgumentParser(description=main.__doc__)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("pending")
+    sub.add_parser("all")
+    for cmd in ("approve", "reject"):
+        sub.add_parser(cmd).add_argument("name")
+    args = p.parse_args()
+    records = learned_records()
+    if args.cmd in ("pending", "all"):
+        for r in records.values():
+            if args.cmd == "all" or r["status"] == "pending":
+                print(f"{r['status']:9} {r['name']:24} {r['kind']:5} {r['box']}  "
+                      f"{r.get('evidence', '')}  | {r.get('context', '')}")
+        return
+    record = records.get(normalise(args.name))
+    if record is None:
+        sys.exit(f"no learned place called {args.name}")
+    _append({**record, "status": "approved" if args.cmd == "approve" else "rejected",
+             "at": time.strftime("%Y-%m-%dT%H:%M:%S")})
+    print(f"{record['name']}: {args.cmd}d")
+
+
+if __name__ == "__main__":
+    main()

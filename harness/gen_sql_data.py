@@ -332,7 +332,7 @@ def request_drift(question: str, request: str, sql: str) -> str | None:
 
 
 def cmd_planner(args) -> None:
-    from planner import PLANNER_PROMPT, TOOLS
+    from planner import NUDGE, PLANNER_PROMPT, TOOLS, announced_step
 
     known = gazetteer.load(include_learned=False)
 
@@ -369,10 +369,10 @@ def cmd_planner(args) -> None:
             messages.append(message.model_dump(exclude_none=True))
             if not calls:
                 # Same rule as planner.run: nudge only when it announced a step.
-                if nudged or "ask_data" not in (message.content or ""):
+                if nudged or not announced_step(message.content):
                     return []
                 nudged = True
-                messages.append({"role": "user", "content": "Call ask_data now for the next step."})
+                messages.append({"role": "user", "content": NUDGE})
                 continue
             for call in calls:
                 try:
