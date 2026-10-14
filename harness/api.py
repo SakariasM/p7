@@ -1,7 +1,8 @@
 """
 FastAPI wrapper around the AIS agents, so the harness can be called over HTTP instead of
-only from the CLI. mode "planner" (default) is the two-model agent in planner.py (needs the
-student job too); mode "single" is the Qwen3-8B-only agent in agent.py.
+only from the CLI. mode "routed" (default) sends simple questions straight to the SQL student
+and the rest through the planner (planner.run_routed); "planner" always uses the planner;
+"single" is the Qwen3-8B-only agent in agent.py. routed and planner need the student job too.
 
 Run (dev, on the login node):
     source ~/llm_venv/bin/activate
@@ -11,7 +12,7 @@ Run (dev, on the login node):
 Then from anywhere on the AAU network:
     curl -X POST http://ailab-fe01:8100/ask -H "Content-Type: application/json" \
         -d '{"question": "How many distinct vessels were seen on 2025-12-01?"}'
-    (add "mode": "single" for the single-model agent)
+    (add "mode": "planner" or "single" to compare)
 """
 
 from typing import Literal
@@ -27,9 +28,9 @@ app = FastAPI(title="P7 AIS Agent Harness")
 
 class AskRequest(BaseModel):
     question: str
-    mode: Literal["planner", "single"] = "planner"
+    mode: Literal["routed", "planner", "single"] = "routed"
     enable_thinking: bool = False
-    max_turns: int | None = None  # default: 10 for planner, 6 for single
+    max_turns: int | None = None  # default: 10 for routed/planner, 6 for single
 
 
 class AskResponse(BaseModel):
@@ -49,8 +50,8 @@ def ask(req: AskRequest):
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="question must not be empty")
     try:
-        run = planner.run if req.mode == "planner" else agent.run
-        max_turns = req.max_turns or (10 if req.mode == "planner" else 6)
+        run = {"routed": planner.run_routed, "planner": planner.run, "single": agent.run}[req.mode]
+        max_turns = req.max_turns or (6 if req.mode == "single" else 10)
         result = run(
             req.question,
             max_turns=max_turns,

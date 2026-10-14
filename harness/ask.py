@@ -4,6 +4,7 @@ each tool call (place lookups, data requests with the SQL the student wrote, por
 the rows or errors, and the final answer. Needs the llm-serve and llm-student jobs.
 
     scripts/ask.sh "How many cruise ships visited Denmark in August?"
+    scripts/ask.sh --mode planner "..."      # always through the planner, for comparison
     scripts/ask.sh --single "..."            # Qwen3-8B alone (agent.py), for comparison
     scripts/ask.sh --feedback ID wrong "counted ferries too"
     scripts/ask.sh --feedback ID correct
@@ -47,11 +48,13 @@ def show_rows(result: dict) -> str:
     return "\n".join(lines)
 
 
-def ask(question: str, single: bool, thinking: bool) -> None:
-    if single:
+def ask(question: str, mode: str, thinking: bool) -> None:
+    if mode == "single":
         from agent import run
-    else:
+    elif mode == "planner":
         from planner import run
+    else:
+        from planner import run_routed as run
     from openai import APIConnectionError
 
     start = time.time()
@@ -65,6 +68,8 @@ def ask(question: str, single: bool, thinking: bool) -> None:
     seconds = round(time.time() - start, 1)
 
     print("\n=== Question\n" + question)
+    if trace.get("route"):
+        print(f"\n=== Route: {trace['route']} ({trace.get('route_reason', '')})")
     if trace.get("plan"):
         print("\n=== Plan\n" + trace["plan"])
     for call in trace.get("place_calls", []):
@@ -82,7 +87,7 @@ def ask(question: str, single: bool, thinking: bool) -> None:
     run_id = time.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
     append(LOG_DIR / f"{time.strftime('%Y-%m-%d')}.jsonl", {
         "id": run_id, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "user": getpass.getuser(),
-        "mode": "single" if single else "planner", "thinking": thinking,
+        "mode": mode, "route": trace.get("route"), "thinking": thinking,
         "question": question, "plan": trace.get("plan"), "answer": trace["answer"],
         "seconds": seconds, "place_calls": trace.get("place_calls", []),
         "steps": [{"request": s.get("request"), "places": s.get("places"), "sql": s.get("sql"),
@@ -107,7 +112,10 @@ def feedback(run_id: str, verdict: str, note: str) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0].strip())
     p.add_argument("question", nargs="*")
-    p.add_argument("--single", action="store_true", help="Qwen3-8B alone instead of the planner")
+    p.add_argument("--mode", choices=["routed", "planner", "single"], default="routed",
+                   help="routed (default): simple questions straight to the student, others via "
+                        "the planner; planner: always the planner; single: Qwen3-8B alone")
+    p.add_argument("--single", action="store_true", help="same as --mode single")
     p.add_argument("--thinking", action="store_true", help="let Qwen3-8B reason (slower)")
     p.add_argument("--feedback", nargs="+", metavar=("ID", "VERDICT"),
                    help="mark a run: ID correct|wrong [note]")
@@ -120,7 +128,7 @@ def main() -> None:
     if not args.question:
         p.error("give a question")
     os.environ.setdefault("PYTHONWARNINGS", "ignore")
-    ask(" ".join(args.question), args.single, args.thinking)
+    ask(" ".join(args.question), "single" if args.single else args.mode, args.thinking)
 
 
 if __name__ == "__main__":

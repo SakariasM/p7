@@ -407,10 +407,20 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
 ROUTER_PROMPT = """\
 You route questions about Danish AIS ship data to one of two ways of answering.
 
-direct: a SQL specialist answers it with ONE query. It handles one thing at a time: a count,
-list, average, maximum, ranking, share or percentage, position, distance, or an hourly or
-daily breakdown, for at most one named place, optionally one ship type, vessel or status,
-over at most a few days.
+direct: a SQL specialist answers it with ONE query. It was trained on these question types,
+each for at most one named place and at most a few days:
+- how many vessels (optionally of one ship type) on a day, in a time window or in a place
+- vessels seen on every day of a short period
+- counts per hour or per day (breakdowns) for one place or ship type
+- rankings: the vessel, hour, grid cell, ship type or destination with the most of something
+- average or highest speed of a ship type or in a place
+- one named vessel: its position at a time, first/last seen, top speed, destination, type
+  and length, distance travelled, number of reports
+- vessels that came within a distance of a named vessel; the two moving vessels that came
+  closest to each other in a place
+- vessels underway, at anchor or moored at a moment
+- share of vessels with a navigational status or of a ship type
+- vessels of a type at least some length long; raw data quality (duplicates, base stations)
 
 plan: a planner splits it into several queries and combines the results. Needed when the
 question compares two or more places, periods, ship types or vessels; asks how something

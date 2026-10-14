@@ -217,6 +217,10 @@ curl -X POST http://ailab-fe01:8100/ask -H "Content-Type: application/json" \
     -d '{"question": "How many distinct vessels were seen on 2025-12-01?"}'
 ```
 
-`/ask` also takes `mode` (`"planner"`, the default, or `"single"`), `enable_thinking` (Qwen3
-reasoning, default false) and `max_turns` (default 10 planner, 6 single), and returns the
-answer, the planner's plan, and every call with its request, SQL and result.
+`/ask` also takes `mode`: `"routed"` (default: one short Qwen3-8B call decides whether the
+SQL student can answer the question with one query; if so, it does and the 8B words the
+answer from the rows, otherwise or if that query fails the planner takes over), `"planner"`
+(always the planner) or `"single"` (Qwen3-8B alone). It also takes `enable_thinking` (Qwen3
+reasoning, default false) and `max_turns` (default 10, 6 single), and returns the answer,
+the plan if any, and every call with its request, SQL and result. `scripts/ask.sh` does the
+same from the command line and shows every step (`--mode planner`, `--single`).
