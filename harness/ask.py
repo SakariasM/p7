@@ -52,9 +52,16 @@ def ask(question: str, single: bool, thinking: bool) -> None:
         from agent import run
     else:
         from planner import run
+    from openai import APIConnectionError
+
     start = time.time()
-    with open(os.devnull, "w") as quiet, contextlib.redirect_stderr(quiet):  # planner debug lines
-        trace = run(question, enable_thinking=thinking, return_trace=True)
+    try:
+        with open(os.devnull, "w") as quiet, contextlib.redirect_stderr(quiet):  # debug lines
+            trace = run(question, enable_thinking=thinking, return_trace=True)
+    except APIConnectionError:
+        sys.exit("A model server is not reachable. It may be restarting (05:00 and 17:00) or "
+                 "still waiting in the queue; it takes a few minutes to load the model.\n"
+                 "Check with: squeue -u pr55oh@student.aau.dk -n llm-serve,llm-student")
     seconds = round(time.time() - start, 1)
 
     print("\n=== Question\n" + question)

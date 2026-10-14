@@ -5,14 +5,15 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=04:00:00
-#SBATCH --array=0-11
+#SBATCH --array=0-11%6
 #SBATCH --exclude=ailab-l4-03,ailab-l4-04
 #SBATCH --output=/ceph/project/P7-Agent-Harness/logs/clean_positions_%A_%a.out
 #SBATCH --error=/ceph/project/P7-Agent-Harness/logs/clean_positions_%A_%a.err
 #
 # Builds data/processed/ais_clean (harness/clean_positions.py), the cleaned data that the
 # vessel_positions view reads. 12 array tasks, each takes every 12th day; finished days are
-# skipped, so a failed run is just submitted again. CPU only.
+# skipped, so a failed run is just submitted again. CPU only. At most 6 tasks run at once
+# (%6): the QOS allows 8 running jobs per user and llm-serve/llm-student need two of them.
 #
 # Usage, from the repo root:  sbatch slurm/clean_positions.slurm
 
