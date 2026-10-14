@@ -10,6 +10,7 @@ Set P7_PROJECT_DIR to point at a different project root.
 import json
 import os
 import re
+import sys
 import threading
 import time
 from pathlib import Path
@@ -25,19 +26,34 @@ PARQUET_GLOB = f"{DATA_DIR}/*/ais.parquet"
 _DATES = sorted(p.parent.name.removeprefix("date=") for p in DATA_DIR.glob("date=*/ais.parquet"))
 DATE_RANGE = f"{_DATES[0]} through {_DATES[-1]}" if _DATES else "no dates (store is empty)"
 
-# Every query connection gets these. vessel_positions applies the same rules as the
-# src/ais cleaning steps and derive COVERAGE box; duplicates are kept (too costly per query).
+# Cleaned ship positions (clean_positions.py): ships in coverage, exact duplicates removed,
+# sog > 50 kn set to NULL, bad GPS positions (outliers and spikes) removed. Used only when
+# every raw day has been cleaned; otherwise vessel_positions falls back to the on-the-fly
+# filters below (same ship/coverage rules, duplicates and bad positions kept).
+CLEAN_DIR = PROJECT_DIR / "data" / "processed" / "ais_clean"
+CLEAN_GLOB = f"{CLEAN_DIR}/*/ais.parquet"
+_CLEAN_DATES = {p.parent.name.removeprefix("date=") for p in CLEAN_DIR.glob("date=*/ais.parquet")}
+USE_CLEAN = bool(_DATES) and set(_DATES) <= _CLEAN_DATES
+if _DATES and not USE_CLEAN:
+    print(f"ais_tool: {len(set(_DATES) - _CLEAN_DATES)} days not cleaned yet, vessel_positions "
+          "uses the raw data with on-the-fly filters", file=sys.stderr)
+
+_VESSEL_POSITIONS = (
+    f"SELECT * FROM read_parquet('{CLEAN_GLOB}', hive_partitioning=1)" if USE_CLEAN else
+    """SELECT * REPLACE (CASE WHEN sog >= 102.2 THEN NULL ELSE sog END AS sog) FROM ais
+  WHERE mobile_type IN ('Class A', 'Class B')
+    AND mmsi BETWEEN 200000000 AND 799999999
+    AND lat BETWEEN 50 AND 64 AND lon BETWEEN -5 AND 32"""
+)
+
+# Every query connection gets these.
 SETUP_SQL = f"""
 CREATE MACRO haversine_m(lat1, lon1, lat2, lon2) AS
   2 * 6371008.8 * asin(sqrt(
       pow(sin(radians(lat2 - lat1) / 2), 2)
     + cos(radians(lat1)) * cos(radians(lat2)) * pow(sin(radians(lon2 - lon1) / 2), 2)));
 CREATE VIEW ais AS SELECT * FROM read_parquet('{PARQUET_GLOB}', hive_partitioning=1);
-CREATE VIEW vessel_positions AS
-  SELECT * REPLACE (CASE WHEN sog >= 102.2 THEN NULL ELSE sog END AS sog) FROM ais
-  WHERE mobile_type IN ('Class A', 'Class B')
-    AND mmsi BETWEEN 200000000 AND 799999999
-    AND lat BETWEEN 50 AND 64 AND lon BETWEEN -5 AND 32;
+CREATE VIEW vessel_positions AS {_VESSEL_POSITIONS};
 """
 
 DEFAULT_ROW_LIMIT = 1000
@@ -169,7 +185,9 @@ TOOL_SCHEMA = {
             "Run a read-only DuckDB SQL SELECT query against Danish AIS vessel data "
             "and return the matching rows. Query the view vessel_positions: ship "
             "position reports (Class A/B transponders, ship MMSIs, positions within "
-            "50-64N 5W-32E; sog is NULL when not available). The view ais has every "
+            "50-64N 5W-32E; sog is NULL when not available"
+            + ("; exact duplicates, bad GPS positions and speeds above 50 kn removed"
+               if USE_CLEAN else "") + "). The view ais has every "
             "raw row incl. base stations and bad fixes; use it only for data-quality "
             "questions. "
             "Columns: ts (TIMESTAMP, UTC), mobile_type, mmsi (BIGINT), lat, lon (DOUBLE), "
