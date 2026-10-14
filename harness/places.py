@@ -28,6 +28,7 @@ from pathlib import Path
 from ais_tool import _DATES, PROJECT_DIR, connect
 
 PLACES_FILE = Path(__file__).with_name("places.json")
+MANUAL_FILE = Path(__file__).with_name("places_manual.json")
 LEARNED_FILE = PROJECT_DIR / "data" / "places_learned.jsonl"
 PLACES_HEADER = "Places (lon_min, lat_min, lon_max, lat_max):"
 
@@ -51,6 +52,7 @@ class Place:
     aliases: list[str] = field(default_factory=list)
     source: str = "manual"
     status: str = "verified"
+    country: str | None = None  # ISO code for ports (DK, SE, ...), None for sea areas
 
     def as_dict(self) -> dict:
         return {"name": self.name, "box": list(self.box), "kind": self.kind,
@@ -88,14 +90,29 @@ def load(include_learned: bool = True) -> list[Place]:
     Templates, data generation and eval use only places.json, so their results do not drift.
     Pending places are not loaded; planner.py uses one only for the question that proposed
     it."""
+    manual_country = {p["name"]: p.get("country")
+                      for p in json.loads(MANUAL_FILE.read_text())["places"]}
     places = [
-        Place(p["name"], tuple(p["box"]), p["kind"], p.get("aliases", []), p["source"])
+        Place(p["name"], tuple(p["box"]), p["kind"], p.get("aliases", []), p["source"],
+              country=_country(p, manual_country))
         for p in json.loads(PLACES_FILE.read_text())["places"]
     ]
     if include_learned:
         places += [Place(r["name"], tuple(r["box"]), r["kind"], [], "learned", "approved")
                    for r in learned_records().values() if r["status"] == "approved"]
     return places
+
+
+def _country(entry: dict, manual_country: dict[str, str | None]) -> str | None:
+    """A port's country: hand-made ports from places_manual.json, AIS-located ports from
+    their LOCODE (DKAAL -> DK), ports located from the (Danish) reference list -> DK."""
+    if entry["kind"] != "port":
+        return None
+    if entry["source"] == "manual":
+        return manual_country.get(entry["name"])
+    if entry.get("locode"):
+        return entry["locode"][:2]
+    return "DK" if entry["source"].startswith("reference") else None
 
 
 def _names(place: Place) -> list[str]:

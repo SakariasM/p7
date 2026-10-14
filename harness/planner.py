@@ -28,6 +28,7 @@ from pathlib import Path
 
 from openai import OpenAI
 
+import functions
 import places
 from agent import MODEL_PATH, get_base_url
 from ais_tool import DATE_RANGE, PROJECT_DIR, extract_sql, query_ais_data
@@ -60,7 +61,8 @@ How to work:
      above); times in UTC
    - places by name, checked first with find_place (see 3), or as a lon/lat box
    - vessel names in capitals as broadcast (e.g. TYCHO BRAHE); ship types such as Cargo,
-     Fishing, Passenger, Tanker, Sailing, Tug, Pleasure, Pilot, HSC, SAR, Military
+     Fishing, Passenger, Tanker, Sailing, Tug, Pleasure, Pilot, HSC, SAR, Military.
+     Cruise ships are not an AIS type: ask for "passenger ships at least 250 m long"
    - a request may cover up to a month only if it also names a ship type, a place or a
      vessel; otherwise ask per day or per week. To count distinct vessels over several
      requests, ask each for the list of vessels (MMSI) and combine the lists yourself (a
@@ -71,15 +73,20 @@ How to work:
    (port or area) and your best estimate of its box (a port: a few km around the harbour).
    If accepted it is used for this question only: say in the answer that its location is
    estimated. If rejected, do not try another box; tell the user the place is unknown.
-   Countries and regions (e.g. Denmark) are not places: ask about their ports or sea areas,
-   or tell the user.
+   Countries and regions (e.g. Denmark) are not places. For vessels visiting or calling at a
+   country (e.g. "visited Denmark in August") call port_calls instead of ask_data (cruise
+   ships: ship_type Passenger, min_length_m 250); otherwise ask about its ports or sea
+   areas, or tell the user.
 4. Do the arithmetic yourself: differences, ratios, percentages, totals across requests.
 5. Check each result against its request and SQL. If it is an error, empty or implausible,
    rephrase the request more simply or split it, at most twice per step. Sending the same
    request again gives the same result.
 6. Answer concisely with the numbers, dates and places, describing each number by what the
    SQL actually computed (e.g. distinct vessels, not reports). Say if a step failed or data
-   was missing. Never invent numbers."""
+   was missing. Never invent numbers.
+7. If you counted cruise ships, say clearly in the answer that you assumed passenger ships
+   of 250 m or longer are cruise ships, and that AIS has no cruise category, so the number
+   cannot be certain (large ferries may be included, small cruise ships missed)."""
 
 ASK_DATA_SCHEMA = {
     "type": "function",
@@ -137,7 +144,7 @@ PROPOSE_PLACE_SCHEMA = {
     },
 }
 
-TOOLS = [ASK_DATA_SCHEMA, FIND_PLACE_SCHEMA, PROPOSE_PLACE_SCHEMA]
+TOOLS = [ASK_DATA_SCHEMA, FIND_PLACE_SCHEMA, PROPOSE_PLACE_SCHEMA, functions.PORT_CALLS_SCHEMA]
 
 
 def find_place(name: str, session: list[places.Place]) -> dict:
@@ -201,6 +208,25 @@ NUDGE = "Call the tool you announced now, or give your final answer if you canno
 def announced_step(content: str | None) -> bool:
     """The planner described a next step instead of calling the tool for it."""
     return bool(_ANNOUNCED_RE.search(strip_thinking(content)))
+
+
+CRUISE_NOTE = (
+    "Note: AIS has no cruise ship category. I assumed passenger ships of 250 m or longer are "
+    "cruise ships, so this number cannot be certain: large ferries may be included and smaller "
+    "cruise ships missed.")
+_CRUISE_SQL_RE = re.compile(r"ship_type\s*=\s*'Passenger'.*length\s*>=?\s*2[5-9]\d",
+                            re.IGNORECASE | re.DOTALL)
+
+
+def with_cruise_note(question: str, answer: str, steps: list[dict]) -> str:
+    """Make sure an answer about cruise ships states the length assumption, whatever the
+    planner wrote (the prompt asks for it, but the model does not always say it)."""
+    used = any(_CRUISE_SQL_RE.search(st["sql"]) or
+               ("port_calls" in st["request"] and '"Passenger"' in st["request"])
+               for st in steps)
+    if ("cruise" in question.lower() or used) and "assum" not in answer.lower():
+        return f"{answer}\n\n{CRUISE_NOTE}"
+    return answer
 
 
 def student_base_url() -> str:
@@ -291,7 +317,7 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
             continue
 
         if not message.tool_calls:
-            answer = strip_thinking(message.content)
+            answer = with_cruise_note(question, strip_thinking(message.content), steps)
             if return_trace:
                 return {"answer": answer, "plan": plan, "tool_calls": steps,
                         "place_calls": place_calls}
@@ -302,6 +328,22 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
                 arguments = json.loads(tool_call.function.arguments)
             except json.JSONDecodeError:
                 arguments = {}
+            if tool_call.function.name == "port_calls":
+                reply = functions.port_calls(
+                    str(arguments.get("country", "")), str(arguments.get("date_from", "")),
+                    str(arguments.get("date_to", "")), arguments.get("ship_type") or None,
+                    arguments.get("min_length_m"), valid_ship_types=VALID_VALUES["ship_type"])
+                print(f"[port_calls] {arguments} -> {reply.get('vessels', reply.get('error'))}",
+                      file=sys.stderr)
+                # Logged as a data step (rows = the vessel count) so the evals can score it.
+                result = ({"error": reply["error"]} if "error" in reply else
+                          {"columns": ["vessels"], "rows": [[reply["vessels"]]], "row_count": 1,
+                           "elapsed_seconds": reply["seconds"]})
+                steps.append({"request": f"port_calls({json.dumps(arguments)})", "places": [],
+                              "sql": "(port_calls)", "result": result})
+                messages.append({"role": "tool", "tool_call_id": tool_call.id,
+                                 "content": json.dumps(reply, default=str)})
+                continue
             if tool_call.function.name in ("find_place", "propose_place"):
                 if tool_call.function.name == "find_place":
                     reply = find_place(str(arguments.get("name", "")), session)
