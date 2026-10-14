@@ -3,7 +3,7 @@
 #SBATCH --partition=l4
 #SBATCH --gres=gpu:0
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
+#SBATCH --mem=48G
 #SBATCH --time=04:00:00
 #SBATCH --array=0-11%6
 #SBATCH --exclude=ailab-l4-03,ailab-l4-04
@@ -23,9 +23,11 @@ trap 'echo "FAILED at line $LINENO (exit code $?)"' ERR
 REPO_DIR="${REPO_DIR:-${SLURM_SUBMIT_DIR:-$PWD}}"
 export P7_PROJECT_DIR="${P7_PROJECT_DIR:-/ceph/project/P7-Agent-Harness}"
 PYTHON="${PYTHON:-$P7_PROJECT_DIR/envs/harness/bin/python}"
-SPILL="/tmp/duckdb_spill_${SLURM_ARRAY_JOB_ID:-x}_${SLURM_ARRAY_TASK_ID:-0}"
+# DuckDB spills the median window to disk; node-local /tmp filled up on a busy node
+# (2026-10-14), so spill to Ceph. DuckDB removes its spill files when it finishes.
+SPILL="$P7_PROJECT_DIR/data/tmp/duckdb_spill_${SLURM_ARRAY_JOB_ID:-x}_${SLURM_ARRAY_TASK_ID:-0}"
 
 echo "=== Clean positions, task ${SLURM_ARRAY_TASK_ID:-0} of 12 on $(hostname) ==="
 cd "$REPO_DIR/harness"
 "$PYTHON" -u clean_positions.py --task "${SLURM_ARRAY_TASK_ID:-0}" --tasks 12 \
-    --threads "${SLURM_CPUS_PER_TASK:-8}" --memory 24GB --spill "$SPILL"
+    --threads "${SLURM_CPUS_PER_TASK:-8}" --memory 40GB --spill "$SPILL"

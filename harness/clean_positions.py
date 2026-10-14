@@ -117,7 +117,8 @@ def main() -> None:
     QUALITY_DIR.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect()
     con.execute(f"SET threads = {args.threads}; SET enable_progress_bar = false; "
-                f"SET memory_limit = '{args.memory}'; SET temp_directory = '{args.spill}'")
+                f"SET memory_limit = '{args.memory}'; SET temp_directory = '{args.spill}'; "
+                "SET preserve_insertion_order = false")  # output is sorted at the end anyway
     con.execute(HAVERSINE)
     days = [d for i, d in enumerate(_DATES) if i % args.tasks == args.task]
     for day in days:
