@@ -320,6 +320,8 @@ def cmd_agent(args) -> None:
         run = functools.partial(planner_run, sql_writer="8b")
     elif args.mode == "student":
         from planner import run_student_only as run
+    elif args.mode == "routed":
+        from planner import run_routed as run
     else:
         from agent import run
     answers = json.loads(args.answers.read_text())
@@ -365,6 +367,7 @@ def cmd_agent(args) -> None:
             records.append({
                 "id": q["id"], "variant": i, "question": text, "tags": q["tags"],
                 "correct": correct, "answer_ok": answer_ok, "sql_seconds": round(sql_seconds, 3),
+                "route": trace.get("route"),
                 "ref_cost": ref, "query_cost": query, **score(f1, ref, query),
                 "answer": trace["answer"], "plan": trace.get("plan"),
                 "calls": [{"request": c.get("request"), "sql": c["sql"],
@@ -411,9 +414,10 @@ def main() -> None:
                      help="only the places a question names in the prompt, as planner.py does")
     run.set_defaults(func=cmd_run)
     agent = sub.add_parser("agent", help="score a whole agent end to end")
-    agent.add_argument("--mode", choices=["planner", "planner-8b", "student", "single"],
+    agent.add_argument("--mode", choices=["planner", "planner-8b", "student", "single", "routed"],
                        default="planner",
-                       help="planner+student, planner+8B as SQL writer, student alone, 8B alone")
+                       help="planner+student, planner+8B as SQL writer, student alone, 8B alone, "
+                            "router (student directly or planner)")
     agent.add_argument("--out", help="write per-question results as JSONL")
     agent.add_argument("--repeats", type=int, default=3, help="timed runs of reference SQL")
     agent.set_defaults(func=cmd_agent)

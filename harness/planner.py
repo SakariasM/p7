@@ -404,6 +404,89 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
     return final
 
 
+ROUTER_PROMPT = """\
+You route questions about Danish AIS ship data to one of two ways of answering.
+
+direct: a SQL specialist answers it with ONE query. It handles one thing at a time: a count,
+list, average, maximum, ranking, share or percentage, position, distance, or an hourly or
+daily breakdown, for at most one named place, optionally one ship type, vessel or status,
+over at most a few days.
+
+plan: a planner splits it into several queries and combines the results. Needed when the
+question compares two or more places, periods, ship types or vessels; asks how something
+changed or for a difference; covers several named places together; needs an average of
+daily (or other) totals; asks about visits to a country; covers more than a few days; or
+otherwise needs arithmetic across separate results.
+
+Reply with only JSON: {"route": "direct" or "plan", "reason": "<a few words>"}"""
+
+PHRASE_PROMPT = """\
+Answer the user's question in one or two sentences from the SQL result below. Use the numbers
+exactly as given (you may round decimals to two places), say what they count (e.g. distinct
+vessels), and do not add anything that is not in the result.
+
+Question: {question}
+SQL: {sql}
+Columns: {columns}
+Rows: {rows}"""
+
+
+def route(planner: OpenAI, question: str) -> tuple[str, str]:
+    """("direct" or "plan", reason) from one short 8B call; "plan" if the reply is unusable."""
+    response = planner.chat.completions.create(
+        model=MODEL_PATH,
+        messages=[{"role": "system", "content": ROUTER_PROMPT},
+                  {"role": "user", "content": question}],
+        temperature=0,
+        max_tokens=60,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+    )
+    text = strip_thinking(response.choices[0].message.content)
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    try:
+        decision = json.loads(match.group(0)) if match else {}
+    except json.JSONDecodeError:
+        decision = {}
+    choice = decision.get("route")
+    return (choice if choice in ("direct", "plan") else "plan"), str(decision.get("reason", text))
+
+
+def run_routed(question: str, max_turns: int = 10, enable_thinking: bool = False,
+               return_trace: bool = False):
+    """Simple questions go straight to the student (one query, answer worded by the 8B); the
+    rest, and direct attempts that fail or return no rows, go through the planner. The
+    comparison of 2026-10-14 showed the student alone is best and 4x faster on single-step
+    questions, while the planner only pays off when a question needs several steps."""
+    planner = OpenAI(base_url=get_base_url(), api_key="not-needed")
+    choice, reason = route(planner, question)
+    if choice == "direct":
+        student = OpenAI(base_url=student_base_url(), api_key="not-needed")
+        step = ask_data(student, question)
+        result = step["result"]
+        if "error" not in result and result.get("rows"):
+            response = planner.chat.completions.create(
+                model=MODEL_PATH,
+                messages=[{"role": "user", "content": PHRASE_PROMPT.format(
+                    question=question, sql=step["sql"], columns=result["columns"],
+                    rows=json.dumps(result["rows"][:MAX_ROWS_FOR_PLANNER], default=str))}],
+                temperature=0,
+                max_tokens=300,
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+            )
+            answer = with_cruise_note(question, strip_thinking(response.choices[0].message.content),
+                                      [step])
+            trace = {"answer": answer, "plan": None, "tool_calls": [step], "place_calls": [],
+                     "route": "direct", "route_reason": reason}
+            return trace if return_trace else answer
+        reason = f"direct attempt failed ({result.get('error', 'no rows')[:80]}); {reason}"
+        choice = "fallback"
+    trace = run(question, max_turns=max_turns, enable_thinking=enable_thinking, return_trace=True)
+    if choice == "fallback":
+        trace["tool_calls"] = [step] + trace["tool_calls"]
+    trace.update(route="plan" if choice == "plan" else "direct->plan", route_reason=reason)
+    return trace if return_trace else trace["answer"]
+
+
 if __name__ == "__main__":
     question = " ".join(sys.argv[1:]) or "How many tankers were in the Kattegat on 3 March 2026?"
-    print(run(question))
+    print(run_routed(question))
