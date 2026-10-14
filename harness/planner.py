@@ -237,17 +237,20 @@ def strip_thinking(text: str | None) -> str:
     return re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
 
 
-def ask_data(student: OpenAI, request: str, session: list[places.Place] | None = None) -> dict:
-    """The student writes SQL for the request (its prompt lists only the places the request
-    names, including places accepted for this question). Unless the SQL uses an unexplained
-    box or a value the data does not have, it runs through query_ais_data."""
+def ask_data(student: OpenAI, request: str, session: list[places.Place] | None = None,
+             model: str = STUDENT_MODEL) -> dict:
+    """The SQL writer (the student, or with model=MODEL_PATH the 8B, for comparison) writes SQL
+    for the request; its prompt lists only the places the request names, including places
+    accepted for this question. Unless the SQL uses an unexplained box or a value the data
+    does not have, it runs through query_ais_data."""
     named = places.mentioned(request, places.load() + (session or []))
     response = student.chat.completions.create(
-        model=STUDENT_MODEL,
+        model=model,
         messages=[{"role": "system", "content": places.with_places(SCHEMA_CONTEXT, named)},
                   {"role": "user", "content": request}],
         temperature=0,
-        max_tokens=512,
+        max_tokens=1024 if model == MODEL_PATH else 512,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
     sql = extract_sql(response.choices[0].message.content)
     stray = places.unexplained_boxes(sql, named, request)
@@ -281,10 +284,29 @@ def for_planner(step: dict) -> dict:
     }
 
 
-def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
-        return_trace: bool = False):
-    planner = OpenAI(base_url=get_base_url(), api_key="not-needed")
+def run_student_only(question: str, return_trace: bool = False, **_):
+    """Baseline without a planner: the student gets the question itself, one SQL query, and
+    the answer is the query result."""
     student = OpenAI(base_url=student_base_url(), api_key="not-needed")
+    step = ask_data(student, question)
+    result = step["result"]
+    answer = (f"Error: {result['error']}" if "error" in result else
+              f"Result ({', '.join(map(str, result['columns']))}): {result['rows'][:20]}")
+    if return_trace:
+        return {"answer": answer, "plan": None, "tool_calls": [step], "place_calls": []}
+    return answer
+
+
+def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
+        return_trace: bool = False, sql_writer: str = "student"):
+    """sql_writer="8b" lets the 8B write the SQL for its own requests instead of the student
+    (same prompt, place list and guards), to measure what the student adds."""
+    planner = OpenAI(base_url=get_base_url(), api_key="not-needed")
+    if sql_writer == "8b":
+        student, sql_model = planner, MODEL_PATH
+    else:
+        student = OpenAI(base_url=student_base_url(), api_key="not-needed")
+        sql_model = STUDENT_MODEL
 
     messages = [
         {"role": "system", "content": PLANNER_PROMPT},
@@ -365,7 +387,7 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
                         "result": {"error": "This exact request already failed and would fail "
                                             "again. Rephrase it more simply or split it."}}
             else:
-                step = ask_data(student, request, session)
+                step = ask_data(student, request, session, model=sql_model)
                 if "error" in step["result"]:
                     failed.add(key)
             print(f"[ask_data] {request}\n    -> {step['sql']}", file=sys.stderr)

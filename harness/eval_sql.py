@@ -144,7 +144,10 @@ def answer_has_reference(answer: str, ref_rows: list[list]) -> bool:
         if value is None or isinstance(value, bool):
             continue
         if isinstance(value, (int, float)):
-            if not any(math.isclose(value, n, rel_tol=1e-2, abs_tol=1e-2) for n in numbers):
+            # A negative change is usually written as "decreased by 2", so |value| also counts.
+            targets = {value, abs(value)}
+            if not any(math.isclose(v, n, rel_tol=1e-2, abs_tol=1e-2)
+                       for v in targets for n in numbers):
                 return False
         elif str(value).strip().lower() not in text:
             return False
@@ -310,6 +313,13 @@ def cmd_run(args) -> None:
 def cmd_agent(args) -> None:
     if args.mode == "planner":
         from planner import run
+    elif args.mode == "planner-8b":
+        import functools
+
+        from planner import run as planner_run
+        run = functools.partial(planner_run, sql_writer="8b")
+    elif args.mode == "student":
+        from planner import run_student_only as run
     else:
         from agent import run
     answers = json.loads(args.answers.read_text())
@@ -401,7 +411,9 @@ def main() -> None:
                      help="only the places a question names in the prompt, as planner.py does")
     run.set_defaults(func=cmd_run)
     agent = sub.add_parser("agent", help="score a whole agent end to end")
-    agent.add_argument("--mode", choices=["planner", "single"], default="planner")
+    agent.add_argument("--mode", choices=["planner", "planner-8b", "student", "single"],
+                       default="planner",
+                       help="planner+student, planner+8B as SQL writer, student alone, 8B alone")
     agent.add_argument("--out", help="write per-question results as JSONL")
     agent.add_argument("--repeats", type=int, default=3, help="timed runs of reference SQL")
     agent.set_defaults(func=cmd_agent)
