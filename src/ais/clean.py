@@ -13,7 +13,7 @@ from typing import Literal
 
 import duckdb
 
-from ais.ingest import CLEAN_TEXT_MACRO, csv_source, typed_select
+from ais.ingest import CLEAN_TEXT_MACRO, typed_source
 from ais.paths import CLEAN_TABLES, DataPaths
 
 MMSI_MIN, MMSI_MAX = 200_000_000, 799_999_999
@@ -114,7 +114,8 @@ def _count(con: duckdb.DuckDBPyConnection, sql: str) -> int:
 
 
 def clean_day(source: Path, day: date, paths: DataPaths) -> list[StepResult]:
-    """Clean one day's raw file (.zip or .csv) into clean/{positions,vessels,quality}/date=DAY/.
+    """Clean one day's raw file (.zip, .csv or processed .parquet) into
+    clean/{positions,vessels,quality}/date=DAY/.
 
     Idempotent per day: outputs are built in a temp dir and swapped in; other days are untouched.
     """
@@ -126,10 +127,8 @@ def clean_day(source: Path, day: date, paths: DataPaths) -> list[StepResult]:
         con.execute(CLEAN_TEXT_MACRO)
 
         staged = tmp / "staged.parquet"
-        with csv_source(source) as src:
-            con.execute(
-                f"COPY ({typed_select(src)}) TO '{staged}' (FORMAT parquet, COMPRESSION zstd)"
-            )
+        with typed_source(source) as select:
+            con.execute(f"COPY ({select}) TO '{staged}' (FORMAT parquet, COMPRESSION zstd)")
 
         bad_day = _count(
             con, f"SELECT count(*) FROM '{staged}' WHERE ts IS NULL OR ts::DATE <> DATE '{day}'"

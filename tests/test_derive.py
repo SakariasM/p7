@@ -6,7 +6,7 @@ import duckdb
 import pytest
 
 from ais.clean import VESSELS_SQL
-from ais.derive import DeriveResult, derive
+from ais.derive import DeriveResult, derive, mmsi_chunks
 from ais.models import BBox
 from ais.paths import DataPaths
 from ais.store.duckdb_store import DuckDBStore
@@ -157,3 +157,39 @@ def test_derive_is_deterministic(paths: DataPaths, derived: DeriveResult) -> Non
     before = digest()
     assert derive(paths) == derived
     assert digest() == before
+
+
+def test_mmsi_chunks_respect_the_limit() -> None:
+    counts = [(1, 4), (2, 4), (3, 9), (4, 1), (5, 1)]
+    assert mmsi_chunks(counts, 8) == [(1, 2), (3, 3), (4, 5)]
+    assert mmsi_chunks(counts, 100) == [(1, 5)]
+    assert mmsi_chunks([], 8) == []
+
+
+def test_chunked_derive_matches_a_single_pass(paths: DataPaths, derived: DeriveResult) -> None:
+    def contents() -> dict[str, object]:
+        out: dict[str, object] = {}
+        for table in ("trips", "stops", "trip_geometry"):
+            row = duckdb.sql(
+                f"SELECT md5(string_agg(t::VARCHAR, '|' ORDER BY t::VARCHAR))"
+                f" FROM '{paths.derived}/{table}/*.parquet' t"
+            ).fetchone()
+            assert row is not None
+            out[table] = row[0]
+        return out
+
+    single = contents()
+    assert derive(paths, max_chunk_positions=1) == derived  # one vessel per chunk
+    assert len(list((paths.derived / "trips").glob("*.parquet"))) > 1
+    assert contents() == single
+
+
+def test_route_matches_trips_and_stops(dstore: DuckDBStore) -> None:
+    start, end = T0 - timedelta(hours=1), T0 + timedelta(days=1)
+    r = dstore.route(STOP_THEN_GO, start, end, max_legs=100)
+    assert [leg.trip_id for leg in r.legs] == [
+        t.trip_id for t in dstore.trips(STOP_THEN_GO, start, end)
+    ]
+    assert len(r.stops) == 1 and not r.truncated
+    one = dstore.route(STOP_THEN_GO, start, end, max_legs=1)
+    assert one.truncated and len(one.legs) == 1
