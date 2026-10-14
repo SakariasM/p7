@@ -37,10 +37,11 @@ from ais_tool import DATE_RANGE, PROJECT_DIR, extract_sql, query_ais_data
 STUDENT_ENDPOINT_FILE = PROJECT_DIR / "serving" / "student_endpoint.txt"
 STUDENT_MODEL = "sql-student"  # --served-model-name in slurm/serve_student.slurm
 SCHEMA_CONTEXT = Path(__file__).with_name("schema_context.md").read_text()
-# Sampling temperature of the planner turns; None = the model default (0.6 for Qwen3-8B).
-# Set P7_PLANNER_TEMPERATURE to compare (e.g. 0 for repeatable runs).
-_T = os.environ.get("P7_PLANNER_TEMPERATURE")
-PLANNER_TEMPERATURE = float(_T) if _T not in (None, "") else None
+# Sampling temperature of the planner turns. 0 by default: in 3+3 repeated runs on 134
+# questions (2026-10-14) it scored 127.3 on average (range 127-128) against 125.7 (124-127)
+# at the model default 0.6. P7_PLANNER_TEMPERATURE overrides it ("" = model default).
+_T = os.environ.get("P7_PLANNER_TEMPERATURE", "0")
+PLANNER_TEMPERATURE = float(_T) if _T != "" else None
 MAX_ROWS_FOR_PLANNER = 100  # the planner has an 8192-token context; enough for vessel lists
 
 PLANNER_PROMPT = f"""\
