@@ -22,6 +22,7 @@ CLI usage (needs both llm-serve and the student job, see slurm/serve_student.slu
 """
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -36,6 +37,10 @@ from ais_tool import DATE_RANGE, PROJECT_DIR, extract_sql, query_ais_data
 STUDENT_ENDPOINT_FILE = PROJECT_DIR / "serving" / "student_endpoint.txt"
 STUDENT_MODEL = "sql-student"  # --served-model-name in slurm/serve_student.slurm
 SCHEMA_CONTEXT = Path(__file__).with_name("schema_context.md").read_text()
+# Sampling temperature of the planner turns; None = the model default (0.6 for Qwen3-8B).
+# Set P7_PLANNER_TEMPERATURE to compare (e.g. 0 for repeatable runs).
+_T = os.environ.get("P7_PLANNER_TEMPERATURE")
+PLANNER_TEMPERATURE = float(_T) if _T not in (None, "") else None
 MAX_ROWS_FOR_PLANNER = 100  # the planner has an 8192-token context; enough for vessel lists
 
 PLANNER_PROMPT = f"""\
@@ -327,6 +332,7 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
             tools=TOOLS,
             tool_choice="auto",
             extra_body={"chat_template_kwargs": {"enable_thinking": enable_thinking}},
+            **({} if PLANNER_TEMPERATURE is None else {"temperature": PLANNER_TEMPERATURE}),
         )
         message = response.choices[0].message
         messages.append(message.model_dump(exclude_none=True))
@@ -421,6 +427,16 @@ each for at most one named place and at most a few days:
 - vessels underway, at anchor or moored at a moment
 - share of vessels with a navigational status or of a ship type
 - vessels of a type at least some length long; raw data quality (duplicates, base stations)
+
+Examples (the places and dates vary):
+- "Which two moving vessels came closest to each other in <place> between 09:00 and 09:10
+  UTC on <date>?" -> direct (one closest-pair query)
+- "How many vessels were in <place> in each hour of <date>?" -> direct (one breakdown)
+- "What percentage of the vessels in <place> on <date> were tugs?" -> direct
+- "Were there more tankers in <place A> or in <place B> on <date>?" -> plan (two places)
+- "How did the number of vessels in <place> change from <date 1> to <date 2>?" -> plan
+- "On average, how many cargo ships were in <place> per day from <date 1> to <date 3>?"
+  -> plan (an average of daily counts)
 
 plan: a planner splits it into several queries and combines the results. Needed when the
 question compares two or more places, periods, ship types or vessels; asks how something
