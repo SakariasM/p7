@@ -17,10 +17,17 @@
   {"name": "Fehmarn Belt", "aliases": ["Femern Bælt", "Fehmarnbelt"], "kind": "area", "box": [10.95, 54.4, 11.6, 54.7]},
   {"name": "Limfjord", "aliases": ["Limfjorden"], "kind": "area", "box": [8.2, 56.4, 10.4, 57.1]},
   {"name": "Kiel Bay", "aliases": ["Kieler Bucht"], "kind": "area", "box": [10.1, 54.3, 11.0, 54.7]},
-  {"name": "Bornholm waters", "aliases": ["around Bornholm"], "kind": "area", "box": [14.5, 54.85, 15.4, 55.45]},
+  {"name": "Bornholm waters", "aliases": ["around Bornholm", "Bornholm", "near Bornholm"], "kind": "area", "box": [14.5, 54.85, 15.4, 55.45]},
   {"name": "Smålandsfarvandet", "aliases": ["Smalandsfarvandet"], "kind": "area", "box": [11.2, 54.9, 12.0, 55.3]},
   {"name": "Isefjord", "aliases": [], "kind": "area", "box": [11.65, 55.7, 11.95, 55.98]},
   {"name": "Arkona Basin", "aliases": ["western Baltic Sea"], "kind": "area", "box": [12.5, 54.5, 14.5, 55.3]},
-  {"name": "Danish North Sea", "aliases": ["North Sea (Danish waters)"], "kind": "area", "box": [4.0, 55.0, 8.5, 57.5]}
+  {"name": "Danish North Sea", "aliases": ["North Sea (Danish waters)"], "kind": "area", "box": [4.0, 55.0, 8.5, 57.5]},
+  {"name": "Nexø", "aliases": ["Nexo", "Neksø", "Nekso"], "kind": "port", "box": [15.118, 55.053, 15.14, 55.068], "country": "DK"},
+  {"name": "Svaneke", "aliases": ["DKSVA"], "kind": "port", "box": [15.139, 55.131, 15.15, 55.142], "country": "DK"},
+  {"name": "Gudhjem", "aliases": ["DKGDM"], "kind": "port", "box": [14.964, 55.209, 14.976, 55.219], "country": "DK"},
+  {"name": "Tejn", "aliases": [], "kind": "port", "box": [14.831, 55.244, 14.842, 55.254], "country": "DK"},
+  {"name": "Allinge", "aliases": ["DKAGE"], "kind": "port", "box": [14.796, 55.273, 14.807, 55.284], "country": "DK"},
+  {"name": "Hasle", "aliases": ["DKHSL"], "kind": "port", "box": [14.697, 55.182, 14.707, 55.192], "country": "DK"},
+  {"name": "Christiansø", "aliases": ["Christianso", "Ertholmene"], "kind": "port", "box": [15.181, 55.315, 15.191, 55.325], "country": "DK"}
  ]
 }

@@ -231,7 +231,9 @@
   {
    "name": "Bornholm waters",
    "aliases": [
-    "around Bornholm"
+    "around Bornholm",
+    "Bornholm",
+    "near Bornholm"
    ],
    "kind": "area",
    "box": [
@@ -294,6 +296,112 @@
     8.5,
     57.5
    ],
+   "source": "manual"
+  },
+  {
+   "name": "Nexø",
+   "aliases": [
+    "Nexo",
+    "Neksø",
+    "Nekso"
+   ],
+   "kind": "port",
+   "box": [
+    15.118,
+    55.053,
+    15.14,
+    55.068
+   ],
+   "country": "DK",
+   "source": "manual"
+  },
+  {
+   "name": "Svaneke",
+   "aliases": [
+    "DKSVA"
+   ],
+   "kind": "port",
+   "box": [
+    15.139,
+    55.131,
+    15.15,
+    55.142
+   ],
+   "country": "DK",
+   "source": "manual"
+  },
+  {
+   "name": "Gudhjem",
+   "aliases": [
+    "DKGDM"
+   ],
+   "kind": "port",
+   "box": [
+    14.964,
+    55.209,
+    14.976,
+    55.219
+   ],
+   "country": "DK",
+   "source": "manual"
+  },
+  {
+   "name": "Tejn",
+   "aliases": [],
+   "kind": "port",
+   "box": [
+    14.831,
+    55.244,
+    14.842,
+    55.254
+   ],
+   "country": "DK",
+   "source": "manual"
+  },
+  {
+   "name": "Allinge",
+   "aliases": [
+    "DKAGE"
+   ],
+   "kind": "port",
+   "box": [
+    14.796,
+    55.273,
+    14.807,
+    55.284
+   ],
+   "country": "DK",
+   "source": "manual"
+  },
+  {
+   "name": "Hasle",
+   "aliases": [
+    "DKHSL"
+   ],
+   "kind": "port",
+   "box": [
+    14.697,
+    55.182,
+    14.707,
+    55.192
+   ],
+   "country": "DK",
+   "source": "manual"
+  },
+  {
+   "name": "Christiansø",
+   "aliases": [
+    "Christianso",
+    "Ertholmene"
+   ],
+   "kind": "port",
+   "box": [
+    15.181,
+    55.315,
+    15.191,
+    55.325
+   ],
+   "country": "DK",
    "source": "manual"
   },
   {
