@@ -3,6 +3,7 @@ Text-to-SQL training data for the student model, with the served Qwen3-8B as tea
 
     cd harness
     python3 gen_sql_data.py templates --per-template 60   # -> OUT/templates.jsonl
+    python3 gen_sql_data.py templates --families day_change new_vessels   # only these
     python3 gen_sql_data.py freeform --prompts 300         # -> OUT/freeform.jsonl
     python3 gen_sql_data.py planner --per-template 60      # -> OUT/planner.jsonl
     python3 gen_sql_data.py export [--export-dir DIR]      # -> DIR/train.jsonl, DIR/val.jsonl
@@ -172,8 +173,12 @@ def make_instances(args) -> list:
     """per_template instances of every template, shuffled, from values sampled with args.seed."""
     rng = random.Random(args.seed)
     sampler = Sampler(connect(), rng, args.days)
+    templates = [t for t in TEMPLATES if not args.families or t.__name__ in args.families]
+    unknown = set(args.families or []) - {t.__name__ for t in TEMPLATES}
+    if unknown:
+        sys.exit(f"unknown template families: {', '.join(sorted(unknown))}")
     instances = []
-    for template in TEMPLATES:
+    for template in templates:
         made = 0
         for _ in range(args.per_template * 3):
             if made == args.per_template:
@@ -186,7 +191,7 @@ def make_instances(args) -> list:
             instances.append(inst)
             made += 1
     rng.shuffle(instances)
-    print(f"{len(instances)} instances from {len(TEMPLATES)} templates", flush=True)
+    print(f"{len(instances)} instances from {len(templates)} templates", flush=True)
     return instances
 
 
@@ -521,6 +526,9 @@ def main() -> None:
         p.set_defaults(func=func)
     sub.choices["templates"].add_argument("--per-template", type=int, default=60)
     sub.choices["planner"].add_argument("--per-template", type=int, default=60)
+    for name in ("templates", "planner"):
+        sub.choices[name].add_argument("--families", nargs="+", metavar="NAME",
+                                       help="only these templates (default: all)")
     sub.choices["freeform"].add_argument("--prompts", type=int, default=300,
                                          help="teacher prompts, 5 questions each")
     sub.choices["freeform"].add_argument("--samples", type=int, default=4)
