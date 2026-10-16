@@ -415,7 +415,7 @@ ROUTER_PROMPT = """\
 You route questions about Danish AIS ship data to one of two ways of answering.
 
 direct: a SQL specialist answers it with ONE query. It was trained on these question types,
-each for at most one named place and at most a few days:
+each for a few named places at most and at most about a week:
 - how many vessels (optionally of one ship type) on a day, in a time window or in a place
 - vessels seen on every day of a short period
 - counts per hour or per day (breakdowns) for one place or ship type
@@ -428,22 +428,29 @@ each for at most one named place and at most a few days:
 - vessels underway, at anchor or moored at a moment
 - share of vessels with a navigational status or of a ship type
 - vessels of a type at least some length long; raw data quality (duplicates, base stations)
+- comparisons in one query: two places, two ship types, or one place on two days (both
+  counts and the difference); two or three named places ranked by their counts
+- distinct vessels in any of two or three named ports (each vessel counted once); vessels
+  seen in both of two ports; vessels in a place on one day that were not there on another
+- the average daily number of vessels (of a type) in a place over a few days
 
 Examples (the places and dates vary):
 - "Which two moving vessels came closest to each other in <place> between 09:00 and 09:10
   UTC on <date>?" -> direct (one closest-pair query)
 - "How many vessels were in <place> in each hour of <date>?" -> direct (one breakdown)
 - "What percentage of the vessels in <place> on <date> were tugs?" -> direct
-- "Were there more tankers in <place A> or in <place B> on <date>?" -> plan (two places)
-- "How did the number of vessels in <place> change from <date 1> to <date 2>?" -> plan
+- "Were there more tankers in <place A> or in <place B> on <date>?" -> direct (comparison)
+- "How did the number of vessels in <place> change from <date 1> to <date 2>?" -> direct
 - "On average, how many cargo ships were in <place> per day from <date 1> to <date 3>?"
-  -> plan (an average of daily counts)
+  -> direct (daily average)
+- "How many cruise ships visited <country> in <month>?" -> plan (port calls in a country)
+- "Did the busiest of <place A> and <place B> on <date> also have the most tankers the
+  week after?" -> plan (a result feeds a second question)
 
 plan: a planner splits it into several queries and combines the results. Needed when the
-question compares two or more places, periods, ship types or vessels; asks how something
-changed or for a difference; covers several named places together; needs an average of
-daily (or other) totals; asks about visits to a country; covers more than a few days; or
-otherwise needs arithmetic across separate results.
+question asks about visits to a country; covers more than about a week or more than three
+places; compares more than two periods, types or vessels; uses one result to ask a further
+question; or otherwise needs arithmetic or reasoning across separate results.
 
 Reply with only JSON: {"route": "direct" or "plan", "reason": "<a few words>"}"""
 

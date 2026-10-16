@@ -14,7 +14,7 @@
 # "sql-student" whatever its path. Same STOP file and libcuda workaround as serve_llm.slurm.
 #
 # Usage (from anywhere; paths come from P7_PROJECT_DIR, not the submit directory):
-#     sbatch slurm/serve_student.slurm                       # models/qwen2.5-coder-1.5b-sql-v3
+#     sbatch slurm/serve_student.slurm                       # models/qwen2.5-coder-1.5b-sql-v4
 #     sbatch slurm/serve_student.slurm /path/to/other/model
 
 set -uo pipefail
@@ -22,7 +22,7 @@ set -uo pipefail
 P7_PROJECT_DIR="${P7_PROJECT_DIR:-/ceph/project/P7-Agent-Harness}"
 CONTAINER="/ceph/container/pytorch/pytorch_25.12.sif"
 VENV_DIR="$HOME/llm_venv"
-MODEL_DIR="${1:-$P7_PROJECT_DIR/models/qwen2.5-coder-1.5b-sql-v3}"
+MODEL_DIR="${1:-$P7_PROJECT_DIR/models/qwen2.5-coder-1.5b-sql-v4}"
 SERVING_DIR="$P7_PROJECT_DIR/serving"
 STOP_FILE="$SERVING_DIR/STOP"
 ENDPOINT_FILE="$SERVING_DIR/student_endpoint.txt"
