@@ -405,6 +405,19 @@
    "source": "manual"
   },
   {
+   "name": "Skive",
+   "aliases": [],
+   "kind": "port",
+   "box": [
+    9.048,
+    56.567,
+    9.058,
+    56.579
+   ],
+   "country": "DK",
+   "source": "manual"
+  },
+  {
    "name": "Barth",
    "aliases": [
     "DEBBH"

@@ -28,6 +28,7 @@
   {"name": "Tejn", "aliases": [], "kind": "port", "box": [14.831, 55.244, 14.842, 55.254], "country": "DK"},
   {"name": "Allinge", "aliases": ["DKAGE"], "kind": "port", "box": [14.796, 55.273, 14.807, 55.284], "country": "DK"},
   {"name": "Hasle", "aliases": ["DKHSL"], "kind": "port", "box": [14.697, 55.182, 14.707, 55.192], "country": "DK"},
-  {"name": "Christiansø", "aliases": ["Christianso", "Ertholmene"], "kind": "port", "box": [15.181, 55.315, 15.191, 55.325], "country": "DK"}
+  {"name": "Christiansø", "aliases": ["Christianso", "Ertholmene"], "kind": "port", "box": [15.181, 55.315, 15.191, 55.325], "country": "DK"},
+  {"name": "Skive", "aliases": [], "kind": "port", "box": [9.048, 56.567, 9.058, 56.579], "country": "DK"}
  ]
 }

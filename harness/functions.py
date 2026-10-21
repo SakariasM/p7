@@ -2,9 +2,9 @@
 Deterministic tools for the planner (the "function calls" step): fixed, tested SQL for
 questions the SQL student cannot answer from one request, run with the usual guardrails.
 
-port_calls: which vessels called at a country's ports in a period. A port call is at least
-one report with speed under PORT_CALL_SOG_KN inside the box of one of that country's ports in
-places.json. The period is queried a week at a time (to stay under the query timeout) and the
+port_calls: which vessels called at a country's ports (or the ports inside a named area, e.g.
+Bornholm) in a period. A port call is at least one report with speed under PORT_CALL_SOG_KN
+inside the box of one of those ports in places.json. The period is queried a week at a time (to stay under the query timeout) and the
 vessels are combined as a set, so a vessel calling in two weeks counts once.
 """
 
@@ -33,21 +33,26 @@ PORT_CALLS_SCHEMA = {
     "function": {
         "name": "port_calls",
         "description": (
-            "Vessels that called at (stopped in) any port of a country in a period: the number "
-            "of distinct vessels, the busiest ports and the MMSI list. Use it for questions "
-            "like 'how many ships visited Denmark in August'. Up to 3 months."),
+            "Vessels that called at (stopped in) any port of a country, or any port inside a "
+            "named area such as an island or sea area, in a period: the number of distinct "
+            "vessels, the busiest ports and the MMSI list. Use it for questions like 'how many "
+            "ships visited Denmark in August' (country) or 'how many ships docked at Bornholm' "
+            "(area). Give country or area, not both. Up to 3 months."),
         "parameters": {
             "type": "object",
             "properties": {
                 "country": {"type": "string", "description": "Denmark, Sweden, Norway, Germany "
                                                              "or Poland (or DK, SE, NO, DE, PL)"},
+                "area": {"type": "string", "description": "instead of country: a place name "
+                                                          "from find_place, e.g. Bornholm; "
+                                                          "the ports inside it count"},
                 "date_from": {"type": "string", "description": "first day, YYYY-MM-DD"},
                 "date_to": {"type": "string", "description": "last day, YYYY-MM-DD"},
                 "ship_type": {"type": "string", "description": "optional AIS ship type, e.g. "
                                                                "Passenger, Cargo, Tanker"},
                 "min_length_m": {"type": "number", "description": "optional minimum length"},
             },
-            "required": ["country", "date_from", "date_to"],
+            "required": ["date_from", "date_to"],
         },
     },
 }
@@ -63,11 +68,32 @@ def _box(p: places.Place) -> str:
     return f"(lon BETWEEN {lon0} AND {lon1} AND lat BETWEEN {lat0} AND {lat1})"
 
 
-def port_calls(country: str, date_from: str, date_to: str, ship_type: str | None = None,
-               min_length_m: float | None = None, valid_ship_types: set[str] | None = None) -> dict:
-    code = country_code(country)
-    if code is None:
-        return {"error": f"unknown country {country!r}; use one of {', '.join(COUNTRIES)}"}
+def _inside(port: places.Place, area: places.Place) -> bool:
+    lon = (port.box[0] + port.box[2]) / 2
+    lat = (port.box[1] + port.box[3]) / 2
+    return area.box[0] <= lon <= area.box[2] and area.box[1] <= lat <= area.box[3]
+
+
+def port_calls(country: str | None, date_from: str, date_to: str, ship_type: str | None = None,
+               min_length_m: float | None = None, valid_ship_types: set[str] | None = None,
+               area: str | None = None) -> dict:
+    known = places.load(include_learned=False)
+    if area:
+        region = places.find(area, known)
+        if region is None:
+            return {"error": f"unknown area {area!r}; check it with find_place"}
+        ports = [p for p in known if p.kind == "port" and _inside(p, region)]
+        code, scope = None, f"the ports inside {region.name}"
+        if not ports:
+            return {"error": f"no known ports inside {region.name}"}
+    else:
+        code = country_code(country or "")
+        if code is None:
+            return {"error": f"unknown country {country!r}; use one of {', '.join(COUNTRIES)}"}
+        ports = [p for p in known if p.kind == "port" and p.country == code]
+        scope = f"the {code} ports"
+        if not ports:
+            return {"error": f"no ports known for {code}"}
     try:
         d0, d1 = date.fromisoformat(date_from), date.fromisoformat(date_to)
     except ValueError:
@@ -82,10 +108,6 @@ def port_calls(country: str, date_from: str, date_to: str, ship_type: str | None
                          f"{', '.join(sorted(valid_ship_types))}"}
     if ship_type is not None and not re.fullmatch(r"[A-Za-z /-]+", ship_type):
         return {"error": "invalid ship_type"}
-    ports = [p for p in places.load(include_learned=False)
-             if p.kind == "port" and p.country == code]
-    if not ports:
-        return {"error": f"no ports known for {code}"}
 
     case = "\n".join(f"WHEN {_box(p)} THEN '{p.name.replace(chr(39), chr(39) * 2)}'"
                      for p in ports)
@@ -118,12 +140,13 @@ def port_calls(country: str, date_from: str, date_to: str, ship_type: str | None
               and float(min_length_m) >= CRUISE_MIN_LENGTH_M)
     return {
         **({"assumption": CRUISE_ASSUMPTION} if cruise else {}),
-        "country": code, "date_from": str(d0), "date_to": str(d1),
+        "country": code, **({"area": region.name, "ports": [p.name for p in ports]} if area else {}),
+        "date_from": str(d0), "date_to": str(d1),
         "ship_type": ship_type, "min_length_m": min_length_m,
         "vessels": len(vessels),
         "ports_with_calls": dict(by_port[:15]),
         "mmsi": vessels[:100],
         "definition": f"a port call is a report with speed < {PORT_CALL_SOG_KN} kn inside one of "
-                      f"the {len(ports)} {code} port boxes in places.json",
+                      f"the boxes of {scope} in places.json ({len(ports)} ports)",
         "seconds": round(seconds, 1),
     }

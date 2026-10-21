@@ -28,6 +28,10 @@ Rules:
 - Areas are boxes: lon BETWEEN lon_min AND lon_max AND lat BETWEEN lat_min AND lat_max.
 - haversine_m(lat1, lon1, lat2, lon2) gives the distance in metres.
 - Missing text is 'Undefined' or 'Unknown value', not NULL.
+- Harbored, docked or in port at a place means sog < 0.5 inside its box. Moored and at
+  anchor are nav_status values: nav_status = 'Moored', nav_status = 'At anchor'.
+- A month means all its days: date BETWEEN DATE '2026-01-01' AND DATE '2026-01-31'.
+- Danish waters, or no place named: no lon/lat filter.
 - Dates without a year are in the data range above. Queries over more than a few days must
   also filter on mmsi, an area or ship_type.
 
