@@ -148,17 +148,28 @@ CLARIFY_RE = re.compile(r"\b(specify|provide|clarify|which|unknown|not (?:proper
                         re.IGNORECASE)
 
 
-def answer_has_reference(answer: str, ref_rows: list[list]) -> bool:
-    """Every reference value appears in the answer text (heuristic, see the module doc)."""
+_LIST_MARKER_RE = re.compile(r"^\s*\d+[.)]\s", re.MULTILINE)
+
+
+def answer_has_reference(answer: str, ref_rows: list[list], question: str | None = None) -> bool:
+    """Every reference value appears in the answer text (heuristic, see the module doc).
+    With the question given, numbers that also appear in the question (its dates, times,
+    years) and numbered-list markers do not count: a model without data that repeats "24
+    September" or writes "1. Identify the ships" must not match a reference of 24 or 1."""
     if not answer or not ref_rows or len(ref_rows) > 10:
         return False
-    numbers = [float(n.replace(",", "")) for n in _NUMBER_RE.findall(answer)]
+    text_numbers = _NUMBER_RE.findall(_LIST_MARKER_RE.sub(" ", answer))
+    numbers = [float(n.replace(",", "")) for n in text_numbers]
+    if question is not None:
+        asked = {float(n.replace(",", "")) for n in _NUMBER_RE.findall(question)}
+        numbers = [n for n in numbers if n not in asked]
     text = answer.lower()
     for value in (v for row in ref_rows for v in row):
         if value is None or isinstance(value, bool):
             continue
-        if isinstance(value, (int, float)) and value == 0 and _NONE_RE.search(text):
-            continue  # "there were no vessels" states a zero count
+        if (isinstance(value, (int, float)) and value == 0 and _NONE_RE.search(text)
+                and not CANNOT_RE.search(text)):
+            continue  # "there were no vessels" states a zero count; "I have no data" does not
         if isinstance(value, (int, float)):
             # A negative change is usually written as "decreased by 2", so |value| also counts.
             targets = {value, abs(value)}
@@ -382,7 +393,7 @@ def cmd_agent(args) -> None:
                 "error" not in r and results_match(answers[q["id"]]["rows"], r["rows"])
                 for r in results
             )
-            answer_ok = answer_has_reference(trace["answer"], answers[q["id"]]["rows"])
+            answer_ok = answer_has_reference(trace["answer"], answers[q["id"]]["rows"], text)
             sql_seconds = sum(
                 r.get("elapsed_seconds", QUERY_TIMEOUT_SECONDS if "timeout" in r.get("error", "")
                       else 0.0)
@@ -467,7 +478,7 @@ def cmd_bare(args) -> None:
             )
             answer = strip_think(response.choices[0].message.content or "")
             if expect == "answer":
-                ok = answer_has_reference(answer, answers[q["id"]]["rows"])
+                ok = answer_has_reference(answer, answers[q["id"]]["rows"], text)
             elif expect == "reply":
                 ok = bool(CANNOT_RE.search(answer))
             else:
