@@ -57,11 +57,11 @@ _VESSEL_DAYS_VIEW = (f"CREATE VIEW vessel_days AS SELECT * FROM read_parquet("
                      f"'{VESSEL_DAYS_GLOB}', hive_partitioning=1);" if HAVE_VESSEL_DAYS else "")
 
 # The SQL student's prompt (schema_context.md). The vessel_days part (schema_vessel_days.md)
-# goes in only for a student trained on it: P7_CONTEXT_DAYS=1 (sql-v5 on); sql-v4 never saw
-# the table, so it stays out by default.
+# goes in only for a student trained on it: sql-v5 on (the served student since 2026-10-21).
+# P7_CONTEXT_DAYS=0 leaves it out, e.g. to evaluate sql-v4, which never saw the table.
 CONTEXT_FILE = Path(__file__).with_name("schema_context.md")
 DAYS_CONTEXT_FILE = Path(__file__).with_name("schema_vessel_days.md")
-CONTEXT_DAYS = os.environ.get("P7_CONTEXT_DAYS", "0") == "1"
+CONTEXT_DAYS = os.environ.get("P7_CONTEXT_DAYS", "1") == "1"
 
 
 def schema_context(days: bool | None = None) -> str:

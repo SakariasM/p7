@@ -16,6 +16,7 @@
 # Usage, from the repo root (arguments after MODEL_DIR go to eval_sql.py run):
 #     sbatch slurm/eval_student.slurm /ceph/project/P7-Agent-Harness/models/qwen2.5-coder-1.5b-sql-v1
 #     sbatch slurm/eval_student.slurm MODEL_DIR --dynamic-places --out .../x.jsonl
+#     EVAL_CMD=bare sbatch slurm/eval_student.slurm MODEL_DIR --out .../x.jsonl  # no harness
 
 set -euo pipefail
 trap 'echo "FAILED at line $LINENO (exit code $?)"' ERR
@@ -66,5 +67,5 @@ OUT_ARGS=(--out "$P7_PROJECT_DIR/logs/eval/${NAME}_${SLURM_JOB_ID:-local}.jsonl"
 for a in "$@"; do
     if [[ "$a" == --out || "$a" == --out=* ]]; then OUT_ARGS=(); fi
 done
-"$P7_PROJECT_DIR/envs/harness/bin/python" -u eval_sql.py run \
+"$P7_PROJECT_DIR/envs/harness/bin/python" -u eval_sql.py "${EVAL_CMD:-run}" \
     --model "$MODEL_DIR" --base-url "http://localhost:${PORT}/v1" "${OUT_ARGS[@]}" "$@"

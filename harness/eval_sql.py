@@ -7,6 +7,7 @@ Text-to-SQL execution accuracy on the held-out questions in eval/questions.toml.
     python3 eval_sql.py run --model NAME --base-url http://host:port/v1 --out results.jsonl
     python3 eval_sql.py run --dynamic-places ...   # place list as at run time (planner.py)
     python3 eval_sql.py agent --mode planner --out planner.jsonl   # or --mode single
+    python3 eval_sql.py bare --model NAME --base-url URL    # baseline: question only, no harness
 
 `run` gives the model schema_context.md as the system prompt and each question (and each
 paraphrase) as the user message, takes one SQL answer at temperature 0, runs it through
@@ -276,7 +277,7 @@ def cmd_run(args) -> None:
     known = places.load(include_learned=False)  # eval must not drift with learned places
     answers = json.loads(args.answers.read_text())
 
-    questions = load_questions(args.questions)
+    questions = [q for q in load_questions(args.questions) if q.get("expect", "answer") == "answer"]
     ref_costs = ReferenceCosts(questions, args.repeats)
     records = []
     for q in questions:
@@ -437,6 +438,68 @@ def cmd_agent(args) -> None:
         print(f"wrote {args.out}")
 
 
+def cmd_bare(args) -> None:
+    """Baseline without any harness: the model gets only the question - no schema, no data,
+    no tools, no planner - and answers in text. Scored like the agents: an answer question
+    is right when every reference value appears in the answer, a reply question when the
+    answer says it cannot answer from the data (or declines), a clarify question when it
+    asks for what is missing."""
+    from openai import OpenAI
+
+    from agent import MODEL_PATH, get_base_url
+
+    client = OpenAI(base_url=args.base_url or get_base_url(), api_key="not-needed")
+    model = args.model or MODEL_PATH
+    answers = json.loads(args.answers.read_text())
+    records = []
+    for q in load_questions(args.questions):
+        expect = q.get("expect", "answer")
+        if expect == "skip":
+            continue
+        for i, text in enumerate([q["question"], *q.get("paraphrases", [])]):
+            t = time.time()
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": text}],
+                temperature=0,
+                max_tokens=512,
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+            )
+            answer = strip_think(response.choices[0].message.content or "")
+            if expect == "answer":
+                ok = answer_has_reference(answer, answers[q["id"]]["rows"])
+            elif expect == "reply":
+                ok = bool(CANNOT_RE.search(answer))
+            else:
+                ok = bool(CLARIFY_RE.search(answer))
+            records.append({"id": q["id"], "variant": i, "question": text, "tags": q["tags"],
+                            "expect": expect, "correct": ok, "answer": answer,
+                            "points": 100.0 if ok else 0.0,
+                            "seconds": round(time.time() - t, 1)})
+            print(f"{'ok ' if ok else '-- '} {q['id']:24} v{i}  {expect:7} "
+                  f"{answer[:80]!r}", flush=True)
+    n = len(records)
+    print(f"\nbare model {model}\nall: {sum(r['correct'] for r in records)}/{n}")
+    for expect in ("answer", "reply", "clarify"):
+        group = [r for r in records if r["expect"] == expect]
+        if group:
+            print(f"  {expect:8} {sum(r['correct'] for r in group)}/{len(group)}")
+    tags = sorted({t for r in records for t in r["tags"]})
+    for tag in tags:
+        group = [r for r in records if tag in r["tags"]]
+        if len(group) >= 3:
+            print(f"  {tag:24} {sum(r['correct'] for r in group)}/{len(group)}")
+    if args.out:
+        with open(args.out, "w") as f:
+            for r in records:
+                f.write(json.dumps(r, ensure_ascii=False, default=str) + "\n")
+        print(f"wrote {args.out}")
+
+
+def strip_think(text: str) -> str:
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0].strip())
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -451,6 +514,12 @@ def main() -> None:
     run.add_argument("--dynamic-places", action="store_true",
                      help="only the places a question names in the prompt, as planner.py does")
     run.set_defaults(func=cmd_run)
+    bare = sub.add_parser("bare", help="baseline: the model answers from the question alone")
+    bare.add_argument("--model", help="served model name (default: agent.MODEL_PATH)")
+    bare.add_argument("--base-url", help="OpenAI-compatible URL (default: current endpoint)")
+    bare.add_argument("--out", help="write per-question results as JSONL")
+    bare.add_argument("--dynamic-places", action="store_true", help="ignored (no prompt)")
+    bare.set_defaults(func=cmd_bare)
     agent = sub.add_parser("agent", help="score a whole agent end to end")
     agent.add_argument("--mode", choices=["planner", "planner-8b", "student", "single", "routed"],
                        default="planner",

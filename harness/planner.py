@@ -104,6 +104,8 @@ How to work:
    island or sea area (e.g. "docked at Bornholm") call port_calls with area. Leave out
    ship_type for all ships.
 4. Do the arithmetic yourself: differences, ratios, percentages, totals across requests.
+   An average per day is the average of the daily counts, never the number of distinct
+   vessels over the period divided by the number of days (most vessels appear on many days).
 5. Check each result against its request and SQL. If it is an error, empty or implausible,
    rephrase the request more simply or split it, at most twice per step. Sending the same
    request again gives the same result.
@@ -277,6 +279,7 @@ _IN_MONTH_RE = re.compile(
 _DANISH_WATERS_RE = re.compile(
     r"\s*\b(?:in|through|across|within|on)\s+(?:the\s+)?danish\s+waters\b", re.IGNORECASE)
 DANISH_WATERS = {"danish waters", "denmark waters", "waters of denmark", "danish sea"}
+_AIS_DATA_RE = re.compile(r"\bthe\s+AIS\s+data(?:set)?\b", re.IGNORECASE)
 
 
 def spell_out(request: str) -> str:
@@ -290,7 +293,10 @@ def spell_out(request: str) -> str:
         last = (date(year + (i == 12), i % 12 + 1, 1) - timedelta(days=1)).day
         name = _MONTH_NAMES[i - 1]
         return f"from 1 {name} {year} to {last} {name} {year}"
-    return _DANISH_WATERS_RE.sub("", _IN_MONTH_RE.sub(month, request))
+    request = _DANISH_WATERS_RE.sub("", _IN_MONTH_RE.sub(month, request))
+    # "in the AIS data" means the dataset; the student read it as the raw ais table (which
+    # times out over the year) - that table is only for questions about raw data quality.
+    return _AIS_DATA_RE.sub("the data", request)
 
 
 def ask_data(student: OpenAI, request: str, session: list[places.Place] | None = None,
@@ -477,7 +483,7 @@ ROUTER_PROMPT = """\
 You route questions sent to a Danish AIS ship-data assistant to one of three ways of answering.
 
 direct: a SQL specialist answers it with ONE query. It was trained on these question types,
-each for a few named places at most and at most about a week:
+each for a few named places at most (and at most about a week unless listed otherwise):
 - how many vessels (optionally of one ship type) on a day, in a time window or in a place
 - vessels seen on every day of a short period
 - counts per hour or per day (breakdowns) for one place or ship type
@@ -495,7 +501,7 @@ each for a few named places at most and at most about a week:
 - distinct vessels in any of two or three named ports (each vessel counted once); vessels
   seen in both of two ports; vessels in a place on one day that were not there on another
 - the average daily number of vessels (of a type) in a place over a few days
-
+<LONG_PERIODS>
 Examples (the places and dates vary):
 - "Which two moving vessels came closest to each other in <place> between 09:00 and 09:10
   UTC on <date>?" -> direct (one closest-pair query)
@@ -516,8 +522,7 @@ Examples (the places and dates vary):
 - "Which fishing boat was used to smuggle drugs?" -> reply (asks to accuse someone)
 
 plan: a planner splits it into several queries and combines the results. Needed when the
-question asks about visits to a country; covers more than about a week or more than three
-places; compares more than two periods, types or vessels; uses one result to ask a further
+question asks about visits to a country; covers more than three places; compares more than two periods, types or vessels; uses one result to ask a further
 question; or otherwise needs arithmetic or reasoning across separate results.
 
 reply: no data query can answer it, so the assistant replies without one. Use it when the
@@ -741,12 +746,21 @@ def clearly_data(question: str) -> bool:
                       or bool(_COUNT_WORDS_RE.search(question)))
 
 
+# With sql-v5 (vessel_days) the student also answers long periods in one query.
+LONG_PERIODS = ("""- over any period up to the whole data (months, the whole year, "on any given day"):
+  how many different vessels, port calls or docked vessels at a named port, vessels passing
+  under a bridge or through a place, comparisons of two places, the average number per day,
+  the busiest day, the largest ship, the average length of vessels, the farthest travelled
+""" if CONTEXT_DAYS and HAVE_VESSEL_DAYS else "")
+
+
 def route(planner: OpenAI, question: str) -> tuple[str, str]:
     """("direct", "plan" or "reply", reason) from one short 8B call; "plan" if the reply is
     unusable."""
     response = planner.chat.completions.create(
         model=MODEL_PATH,
-        messages=[{"role": "system", "content": ROUTER_PROMPT},
+        messages=[{"role": "system", "content": ROUTER_PROMPT.replace("<LONG_PERIODS>",
+                                                                      LONG_PERIODS)},
                   {"role": "user", "content": question}],
         temperature=0,
         max_tokens=60,
