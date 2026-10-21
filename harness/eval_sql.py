@@ -51,12 +51,12 @@ except ModuleNotFoundError:  # Python < 3.11 on the login node
     import tomli as tomllib
 
 import places
-from ais_tool import QUERY_TIMEOUT_SECONDS, extract_sql, query_ais_data
+from ais_tool import QUERY_TIMEOUT_SECONDS, extract_sql, query_ais_data, schema_context
 
 HERE = Path(__file__).parent
-QUESTIONS_FILE = HERE / "eval" / "questions.toml"
+EVAL_DIR = HERE / "eval"
+QUESTIONS_FILE = EVAL_DIR / "questions.toml"
 ANSWERS_FILE = HERE / "eval" / "answers.json"
-CONTEXT_FILE = HERE / "schema_context.md"
 
 CORRECT_POINTS = 70
 SPEED_POINTS = 30
@@ -272,7 +272,7 @@ def cmd_run(args) -> None:
 
     client = OpenAI(base_url=args.base_url or get_base_url(), api_key="not-needed")
     model = args.model or MODEL_PATH
-    context = CONTEXT_FILE.read_text()
+    context = schema_context()
     known = places.load(include_learned=False)  # eval must not drift with learned places
     answers = json.loads(args.answers.read_text())
 

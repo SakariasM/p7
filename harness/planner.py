@@ -33,18 +33,30 @@ from openai import OpenAI
 import functions
 import places
 from agent import MODEL_PATH, get_base_url
-from ais_tool import (_DATES, DATE_RANGE, DEFAULT_ROW_LIMIT, PROJECT_DIR, extract_sql,
-                      query_ais_data)
+from ais_tool import (_DATES, CONTEXT_DAYS, DATE_RANGE, DEFAULT_ROW_LIMIT, HAVE_VESSEL_DAYS,
+                      PROJECT_DIR, extract_sql, query_ais_data, schema_context)
 
 STUDENT_ENDPOINT_FILE = PROJECT_DIR / "serving" / "student_endpoint.txt"
 STUDENT_MODEL = "sql-student"  # --served-model-name in slurm/serve_student.slurm
-SCHEMA_CONTEXT = Path(__file__).with_name("schema_context.md").read_text()
+SCHEMA_CONTEXT = schema_context()
 # Sampling temperature of the planner turns. 0 by default: in 3+3 repeated runs on 134
 # questions (2026-10-14) it scored 127.3 on average (range 127-128) against 125.7 (124-127)
 # at the model default 0.6. P7_PLANNER_TEMPERATURE overrides it ("" = model default).
 _T = os.environ.get("P7_PLANNER_TEMPERATURE", "0")
 PLANNER_TEMPERATURE = float(_T) if _T != "" else None
 MAX_ROWS_FOR_PLANNER = 100  # the planner has an 8192-token context; enough for vessel lists
+
+# How long a period one request may cover. The student trained on vessel_days (sql-v5,
+# P7_CONTEXT_DAYS=1) answers any period in one query; sql-v4 must split long periods.
+PERIOD_RULE = (
+    """   - one request may cover any period, up to the whole data (e.g. "from 1 October 2025 to
+     30 September 2026"): ask for the total, average or list over the whole period at once,
+     never split it into parts and add them up"""
+    if CONTEXT_DAYS and HAVE_VESSEL_DAYS else
+    """   - a request may cover up to a month only if it also names a ship type, a place or a
+     vessel; otherwise ask per day or per week. To count distinct vessels over several
+     requests, ask each for the list of vessels (MMSI) and combine the lists yourself (a
+     vessel in two weeks counts once); never add up distinct counts""")
 
 PLANNER_PROMPT = f"""\
 You answer questions about Danish AIS ship-tracking data ({DATE_RANGE}): position reports
@@ -79,10 +91,7 @@ How to work:
      Danish waters, or no place given = the whole data, so name no place; ships passing
      under a bridge = moving vessels (speed at least 1 knot) inside the bridge's place, e.g.
      the Great Belt Bridge or the Little Belt bridges
-   - a request may cover up to a month only if it also names a ship type, a place or a
-     vessel; otherwise ask per day or per week. To count distinct vessels over several
-     requests, ask each for the list of vessels (MMSI) and combine the lists yourself (a
-     vessel in two weeks counts once); never add up distinct counts
+{PERIOD_RULE}
    - no SQL, table or column names
 3. Call find_place for every place before your first request about it, and use the name it
    returns. If it is unknown you may call propose_place once for that place, with its kind
@@ -100,9 +109,9 @@ How to work:
    request again gives the same result.
 6. Answer concisely with the numbers, dates and places, describing each number by what the
    SQL actually computed (e.g. distinct vessels, not reports). Say if a step failed or data
-   was missing. Never invent numbers. No ship is longer than about 400 m: lengths over 450
-   m are AIS errors, so for the largest or longest ship ask again for vessels at most 450 m
-   long, and mention that longer values were left out as errors.
+   was missing. Never invent numbers. No ship is longer than about 400 m: longer lengths are
+   AIS errors, so for the largest or longest ship ask again for vessels at most 400 m long,
+   and mention that longer values were left out as errors.
 7. If you counted cruise ships, say clearly in the answer that you assumed passenger ships
    of 250 m or longer are cruise ships, and that AIS has no cruise category, so the number
    cannot be certain (large ferries may be included, small cruise ships missed)."""

@@ -809,6 +809,312 @@ COMPOSITE_TEMPLATES = [
     busiest_of_places, new_vessels,
 ]
 
+
+# --- sql-v5 templates -------------------------------------------------------------------
+# Long periods, whole-data totals and per-vessel averages from vessel_days (one row per vessel
+# per day, build_vessel_days.py), and "harbored at a moment" alone and in comparisons (sql-v4
+# compared whole days and dropped the harbour condition). Months are never September 2026,
+# which holds the eval days.
+HARBOR_MUST = r"harbou?r|dock|in port|berth|quay|tied up"
+PASS_MUST = r"pass|under|through|transit|cross|went|go"
+LARGEST_MUST = r"larg|long|big|max"
+DISTANCE_MUST = r"distance|far|travel|longest|most (?:km|kilomet)"
+_DATA_MONTHS = sorted({(int(d[:4]), int(d[5:7])) for d in _DATES} - {(2026, 9)})
+BRIDGES = ["Great Belt Bridge", "Little Belt bridges"]
+MAX_REAL_LENGTH_M = 400  # the longest real ships are ~400 m; longer AIS lengths are errors
+
+
+def singular(plural: str) -> str:
+    return plural if plural.endswith("craft") else plural[:-1]
+
+
+def month_span(year: int, month: int) -> tuple[date, date]:
+    first = date(year, month, 1)
+    last = date(year + (month == 12), month % 12 + 1, 1) - timedelta(days=1)
+    return first, last
+
+
+def long_period(s: Sampler) -> tuple[date, date, str, list[str]]:
+    """A month (60 %) or a 8-40 day range, its wording and the patterns to keep."""
+    r = s.rng
+    if r.random() < 0.6:
+        year, month = r.choice(_DATA_MONTHS)
+        d0, d1 = month_span(year, month)
+        name = MONTHS[month - 1]
+        with_year = r.random() < 0.7
+        text = r.choice(["in {m}", "during {m}", "in the month of {m}"]).format(
+            m=f"{name} {year}" if with_year else name)
+        musts = [name.lower()[:3]] + ([str(year)] if with_year else [])
+        return d0, d1, text, musts
+    while True:
+        d0 = s.day()
+        d1 = d0 + timedelta(days=r.randint(8, 40))
+        days = [d0 + timedelta(days=i) for i in range((d1 - d0).days + 1)]
+        if d1.isoformat() <= _DATES[-1] and not any(d in EXCLUDED_DATES for d in days):
+            break
+    text = r.choice(["between {a} and {b}", "from {a} to {b}"]).format(
+        a=d_text(d0, r), b=d_text(d1, r))
+    return d0, d1, text, [d_must(d0), d_must(d1)]
+
+
+def vd_where(d0: date, d1: date, extra: str = "") -> str:
+    when = f"date = {d_sql(d0)}" if d0 == d1 else f"date BETWEEN {d_sql(d0)} AND {d_sql(d1)}"
+    return f"{when}{extra}"
+
+
+def vd_type(t: str | None) -> str:
+    return f" AND ship_type = {sql_str(t)}" if t else ""
+
+
+def vd_count_place_period(s: Sampler) -> Instance:
+    r = s.rng
+    d0, d1, when, dm = long_period(s)
+    p = s.place(big=False)
+    t = s.ship_type() if r.random() < 0.5 else None
+    noun, tm = what(t)
+    pt, pm = place_text(p)
+    q = r.choice(["How many different {w} visited {p} {when}?",
+                  "How many distinct {w} were seen in {p} {when}?",
+                  "Count the {w} that were in {p} {when}."]).format(w=noun, p=pt, when=when)
+    sql = (f"SELECT count(DISTINCT mmsi) AS vessels FROM vessel_days\n"
+           f"WHERE {vd_where(d0, d1)} AND list_contains(places, {sql_str(p)}){vd_type(t)}")
+    return Instance("vd_count_place_period", q, sql, [*dm, pm, *tm])
+
+
+def vd_docked_period(s: Sampler) -> Instance:
+    r = s.rng
+    d0, d1, when, dm = long_period(s)
+    p = r.choice(PORTS)
+    t = s.ship_type() if r.random() < 0.4 else None
+    noun, tm = what(t)
+    pt, pm = place_text(p)
+    q = r.choice(["How many {w} docked in {p} {when}?",
+                  "How many different {w} were harbored in {p} {when}?",
+                  "How many {w} lay in port at {p} {when}?"]).format(w=noun, p=pt, when=when)
+    sql = (f"SELECT count(DISTINCT mmsi) AS vessels FROM vessel_days\n"
+           f"WHERE {vd_where(d0, d1)} AND list_contains(still_in, {sql_str(p)}){vd_type(t)}")
+    return Instance("vd_docked_period", q, sql, [*dm, pm, HARBOR_MUST, *tm])
+
+
+def vd_moving_through(s: Sampler) -> Instance:
+    r = s.rng
+    d0, d1, when, dm = long_period(s)
+    p = r.choice(BRIDGES) if r.random() < 0.6 else s.place()
+    t = s.ship_type() if r.random() < 0.3 else None
+    noun, tm = what(t)
+    pt, pm = place_text(p)
+    if p in BRIDGES:
+        q = r.choice(["How many {w} passed under {p} {when}?",
+                      "How many different {w} went under {p} {when}?"])
+    else:
+        q = r.choice(["How many {w} moved through {p} {when}?",
+                      "How many different {w} passed through {p} {when}?"])
+    q = q.format(w=noun, p=pt, when=when)
+    sql = (f"SELECT count(DISTINCT mmsi) AS vessels FROM vessel_days\n"
+           f"WHERE {vd_where(d0, d1)} AND list_contains(moving_in, {sql_str(p)}){vd_type(t)}")
+    return Instance("vd_moving_through", q, sql, [*dm, pm, PASS_MUST, *tm])
+
+
+def vd_compare_period(s: Sampler) -> Instance:
+    r = s.rng
+    d0, d1, when, dm = long_period(s)
+    bridges = r.random() < 0.4
+    p1, p2 = (BRIDGES if r.random() < 0.5 else BRIDGES[::-1]) if bridges else r.sample(BIG_PLACES, 2)
+    column = "moving_in" if bridges else "places"
+    t = s.ship_type() if r.random() < 0.4 else None
+    noun, tm = what(t)
+    (a, am), (b, bm) = place_text(p1), place_text(p2)
+    if bridges:
+        q = r.choice(["Did more {w} pass under {a} or under {b} {when}?",
+                      "Which had more {w} passing under it {when}, {a} or {b}?"])
+    else:
+        q = r.choice(["Were there more {w} in {a} or in {b} {when}?",
+                      "Which saw more different {w} {when}, {a} or {b}? Give both numbers."])
+    q = q.format(w=noun, a=a, b=b, when=when)
+    part = ("SELECT count(DISTINCT mmsi) AS n FROM vessel_days WHERE {w} AND "
+            "list_contains({c}, {p}){t}")
+    sql = (f"WITH a AS ({part.format(w=vd_where(d0, d1), c=column, p=sql_str(p1), t=vd_type(t))}),\n"
+           f"     b AS ({part.format(w=vd_where(d0, d1), c=column, p=sql_str(p2), t=vd_type(t))})\n"
+           f"SELECT CASE WHEN a.n > b.n THEN {sql_str(p1)} WHEN b.n > a.n THEN {sql_str(p2)} "
+           f"END AS more_in,\n       a.n AS {sql_ident(p1)}, b.n AS {sql_ident(p2)} FROM a, b")
+    return Instance("vd_compare_period", q, sql,
+                    [*dm, am, bm, *tm] + ([PASS_MUST] if bridges else []))
+
+
+def vd_daily_average(s: Sampler) -> Instance | None:
+    r = s.rng
+    whole = r.random() < 0.2
+    t = s.ship_type() if r.random() < 0.5 else None
+    noun, tm = what(t)
+    if whole:
+        p = None
+        q = r.choice(["On average, how many {w} are seen per day in the data?",
+                      "Across the whole data, what is the mean daily count of {w}?",
+                      "How many {w} are there on an average day?"]).format(w=noun)
+        where, dm = (f"ship_type = {sql_str(t)}" if t else ""), []
+    else:
+        d0, d1, when, dm = long_period(s)
+        p = s.place() if r.random() < 0.5 else None
+        where_text = f" in {place_text(p)[0]}" if p else ""
+        q = r.choice(["On average, how many {w} were seen per day{p} {when}?",
+                      "What was the average daily number of {w}{p} {when}?"]).format(
+            w=noun, p=where_text, when=when)
+        where = vd_where(d0, d1, (f" AND list_contains(places, {sql_str(p)})" if p else "")
+                         + vd_type(t))
+    sql = (f"SELECT round(avg(n), 1) AS per_day FROM (\n  SELECT date, count(*) AS n "
+           f"FROM vessel_days{f' WHERE {where}' if where else ''} GROUP BY date\n)")
+    musts = [*dm, AVERAGE_MUST, *tm] + ([place_text(p)[1]] if p else [])
+    return Instance("vd_daily_average", q, sql, musts)
+
+
+def vd_total_vessels(s: Sampler) -> Instance:
+    r = s.rng
+    t = s.ship_type(common=False) if r.random() < 0.5 else None
+    noun, tm = what(t)
+    if r.random() < 0.3:
+        q = r.choice(["How many different {w} are in the data in total?",
+                      "Over the whole period covered, how many distinct {w} were recorded?",
+                      "How many distinct {w} appear in the whole data?"]).format(w=noun)
+        sql = (f"SELECT count(DISTINCT mmsi) AS vessels FROM vessel_days"
+               + (f" WHERE ship_type = {sql_str(t)}" if t else ""))
+        return Instance("vd_total_vessels", q, sql, [r"total|whole|all|in the data", *tm])
+    d0, d1, when, dm = long_period(s)
+    q = r.choice(["How many different {w} were seen {when}?",
+                  "What was the total number of distinct {w} {when}?"]).format(w=noun, when=when)
+    sql = (f"SELECT count(DISTINCT mmsi) AS vessels FROM vessel_days WHERE "
+           f"{vd_where(d0, d1)}{vd_type(t)}")
+    return Instance("vd_total_vessels", q, sql, [*dm, *tm])
+
+
+def vd_largest_ship(s: Sampler) -> Instance:
+    r = s.rng
+    d0, d1, when, dm = long_period(s)
+    p = s.place() if r.random() < 0.4 else None
+    t = s.ship_type() if r.random() < 0.4 else None
+    noun = singular(SHIP_TYPES[t][0]) if t else "ship"
+    tm = [SHIP_TYPES[t][1]] if t else []
+    where_text = f" in {place_text(p)[0]}" if p else ""
+    q = r.choice(["What was the largest {w} seen{p} {when}?",
+                  "Which was the longest {w}{p} {when}?",
+                  "What is the biggest {w} that sailed{p} {when}?"]).format(
+        w=noun, p=where_text, when=when)
+    where = vd_where(d0, d1, (f" AND list_contains(places, {sql_str(p)})" if p else "")
+                     + vd_type(t) + f" AND length <= {MAX_REAL_LENGTH_M}")
+    sql = (f"SELECT DISTINCT name, length FROM vessel_days\nWHERE {where}\n"
+           f"  AND length = (SELECT max(length) FROM vessel_days WHERE {where})\n"
+           f"ORDER BY name LIMIT 10")
+    return Instance("vd_largest_ship", q, sql,
+                    [*dm, LARGEST_MUST, *tm] + ([place_text(p)[1]] if p else []))
+
+
+def vd_avg_length(s: Sampler) -> Instance:
+    r = s.rng
+    if r.random() < 0.5:
+        d0 = d1 = s.day()
+        when, dm = f"on {d_text(d0, r)}", [d_must(d0)]
+    else:
+        d0, d1, when, dm = long_period(s)
+    p = s.place()
+    t = s.ship_type() if r.random() < 0.4 else None
+    noun, tm = what(t)
+    pt, pm = place_text(p)
+    q = r.choice(["How big were the {w} in {p} {when}, on average?",
+                  "What was the average length of the {w} in {p} {when}?",
+                  "How long were the {w} in {p} {when} on average?"]).format(
+        w=noun, p=pt, when=when)
+    sql = (f"SELECT round(avg(length), 1) AS avg_length_m FROM (\n"
+           f"  SELECT mmsi, max(length) AS length FROM vessel_days\n"
+           f"  WHERE {vd_where(d0, d1)} AND list_contains(places, {sql_str(p)}){vd_type(t)}\n"
+           f"  GROUP BY mmsi\n)")
+    return Instance("vd_avg_length", q, sql, [*dm, pm, r"size|length|long|big", *tm])
+
+
+def vd_busiest_day(s: Sampler) -> Instance:
+    r = s.rng
+    d0, d1, when, dm = long_period(s)
+    p = s.place() if r.random() < 0.6 else None
+    t = s.ship_type() if r.random() < 0.4 else None
+    noun, tm = what(t)
+    where_text = f" in {place_text(p)[0]}" if p else ""
+    q = r.choice(["Which day {when} had the most {w}{p}?",
+                  "On which day {when} were the most {w} seen{p}?"]).format(
+        w=noun, p=where_text, when=when)
+    where = vd_where(d0, d1, (f" AND list_contains(places, {sql_str(p)})" if p else "")
+                     + vd_type(t))
+    sql = (f"SELECT date, count(*) AS vessels FROM vessel_days WHERE {where}\n"
+           f"GROUP BY date ORDER BY vessels DESC, date LIMIT 1")
+    return Instance("vd_busiest_day", q, sql,
+                    [*dm, r"most|busiest", *tm] + ([place_text(p)[1]] if p else []))
+
+
+def vd_farthest(s: Sampler) -> Instance:
+    r = s.rng
+    if r.random() < 0.5:
+        d0 = d1 = s.day()
+        when, dm = f"on {d_text(d0, r)}", [d_must(d0)]
+    else:
+        d0, d1, when, dm = long_period(s)
+    t = s.ship_type() if r.random() < 0.5 else None
+    noun = singular(SHIP_TYPES[t][0]) if t else "vessel"
+    tm = [SHIP_TYPES[t][1]] if t else []
+    q = r.choice(["Which {w} travelled the longest distance {when}?",
+                  "Which {w} covered the most kilometres {when}?"]).format(w=noun, when=when)
+    sql = (f"SELECT mmsi, any_value(name) AS name, round(sum(distance_km), 1) AS km\n"
+           f"FROM vessel_days WHERE {vd_where(d0, d1)}{vd_type(t)}\n"
+           f"GROUP BY mmsi ORDER BY km DESC, mmsi LIMIT 1")
+    return Instance("vd_farthest", q, sql, [*dm, DISTANCE_MUST, *tm])
+
+
+def harbored_at_part(p: str, d: date, hhmm: str) -> str:
+    return (f"SELECT count(*) AS n FROM (\n"
+            f"  SELECT mmsi, arg_max(sog, ts) AS sog FROM vessel_positions\n"
+            f"  WHERE date = {d_sql(d)} AND {box_sql(p)}\n"
+            f"    AND ts > {ts_sql(d, hhmm)} - INTERVAL 10 MINUTE AND ts <= {ts_sql(d, hhmm)}\n"
+            f"  GROUP BY mmsi\n) WHERE sog < 0.5")
+
+
+def _odd_time(r: random.Random) -> str:
+    return f"{r.randint(0, 23):02d}:{r.choice([0, 0, 15, 30, 45, r.randint(1, 59)]):02d}"
+
+
+def harbored_at_time(s: Sampler) -> Instance:
+    r = s.rng
+    d, p, hhmm = s.day(), r.choice(PORTS), _odd_time(r)
+    pt, pm = place_text(p)
+    q = r.choice(["How many vessels were docked in {p} at {t} UTC on {d}?",
+                  "How many ships lay in port at {p} at {t} on {d}?",
+                  "At {t} on {d}, how many boats were in harbour at {p}?"]).format(
+        p=pt, d=d_text(d, r), t=hhmm)
+    return Instance("harbored_at_time", q, harbored_at_part(p, d, hhmm),
+                    [d_must(d), pm, hhmm_must(hhmm), HARBOR_MUST])
+
+
+def harbored_compare_at_time(s: Sampler) -> Instance:
+    r = s.rng
+    d, hhmm = s.day(), _odd_time(r)
+    p1 = r.choice(PORTS)
+    p2 = r.choice(NEAR_PORTS[p1] + r.sample(PORTS, 3))
+    if p2 == p1:
+        p2 = r.choice([x for x in PORTS if x != p1])
+    (a, am), (b, bm) = place_text(p1), place_text(p2)
+    q = r.choice(["At {t} UTC on {d}, were more ships docked in {a} or in {b}?",
+                  "Were more ships docked in {a} or in {b} at {t} UTC on {d}?",
+                  "Compare the number of vessels in port at {a} and at {b} at {t} on {d}."]).format(
+        a=a, b=b, t=hhmm, d=d_text(d, r))
+    sql = (f"WITH a AS ({harbored_at_part(p1, d, hhmm)}),\n"
+           f"     b AS ({harbored_at_part(p2, d, hhmm)})\n"
+           f"SELECT CASE WHEN a.n > b.n THEN {sql_str(p1)} WHEN b.n > a.n THEN {sql_str(p2)} "
+           f"END AS more_in,\n       a.n AS {sql_ident(p1)}, b.n AS {sql_ident(p2)} FROM a, b")
+    return Instance("harbored_compare_at_time", q, sql,
+                    [d_must(d), am, bm, hhmm_must(hhmm), HARBOR_MUST])
+
+
+V5_TEMPLATES = [
+    vd_count_place_period, vd_docked_period, vd_moving_through, vd_compare_period,
+    vd_daily_average, vd_total_vessels, vd_largest_ship, vd_avg_length, vd_busiest_day,
+    vd_farthest, harbored_at_time, harbored_compare_at_time,
+]
+
 TEMPLATES = [
     vessels_on_day, vessels_type_day, vessels_window, vessels_place_window,
     vessels_place_type_range, vessels_every_day, daily_counts, hourly_counts_place,
@@ -817,4 +1123,4 @@ TEMPLATES = [
     vessel_destination, vessel_static, vessel_distance, underway_type_at_time,
     status_at_time_place, status_share, near_vessel, closest_pair_place, long_ships,
     top_destinations, duplicate_share, non_vessel_rows,
-] + COMPOSITE_TEMPLATES
+] + COMPOSITE_TEMPLATES + V5_TEMPLATES

@@ -46,6 +46,32 @@ _VESSEL_POSITIONS = (
     AND lat BETWEEN 50 AND 64 AND lon BETWEEN -5 AND 32"""
 )
 
+# One row per vessel per day (build_vessel_days.py), for long periods and whole-data totals.
+# Used only when every day has been built.
+VESSEL_DAYS_DIR = PROJECT_DIR / "data" / "derived" / "vessel_days"
+VESSEL_DAYS_GLOB = f"{VESSEL_DAYS_DIR}/*/vessel_days.parquet"
+_VD_DATES = {p.parent.name.removeprefix("date=")
+             for p in VESSEL_DAYS_DIR.glob("date=*/vessel_days.parquet")}
+HAVE_VESSEL_DAYS = bool(_DATES) and set(_DATES) <= _VD_DATES
+_VESSEL_DAYS_VIEW = (f"CREATE VIEW vessel_days AS SELECT * FROM read_parquet("
+                     f"'{VESSEL_DAYS_GLOB}', hive_partitioning=1);" if HAVE_VESSEL_DAYS else "")
+
+# The SQL student's prompt (schema_context.md). The vessel_days part (schema_vessel_days.md)
+# goes in only for a student trained on it: P7_CONTEXT_DAYS=1 (sql-v5 on); sql-v4 never saw
+# the table, so it stays out by default.
+CONTEXT_FILE = Path(__file__).with_name("schema_context.md")
+DAYS_CONTEXT_FILE = Path(__file__).with_name("schema_vessel_days.md")
+CONTEXT_DAYS = os.environ.get("P7_CONTEXT_DAYS", "0") == "1"
+
+
+def schema_context(days: bool | None = None) -> str:
+    text = CONTEXT_FILE.read_text()
+    if (CONTEXT_DAYS if days is None else days) and HAVE_VESSEL_DAYS:
+        head, sep, rest = text.partition("\nRules:\n")
+        text = head + "\n" + DAYS_CONTEXT_FILE.read_text().rstrip("\n") + sep + rest
+    return text
+
+
 # Every query connection gets these.
 SETUP_SQL = f"""
 CREATE MACRO haversine_m(lat1, lon1, lat2, lon2) AS
@@ -54,6 +80,7 @@ CREATE MACRO haversine_m(lat1, lon1, lat2, lon2) AS
     + cos(radians(lat1)) * cos(radians(lat2)) * pow(sin(radians(lon2 - lon1) / 2), 2)));
 CREATE VIEW ais AS SELECT * FROM read_parquet('{PARQUET_GLOB}', hive_partitioning=1);
 CREATE VIEW vessel_positions AS {_VESSEL_POSITIONS};
+{_VESSEL_DAYS_VIEW}
 """
 
 DEFAULT_ROW_LIMIT = 1000

@@ -47,8 +47,8 @@ from pathlib import Path
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
 from agent import MODEL_PATH, get_base_url
-from ais_tool import PROJECT_DIR, connect, extract_sql
-from eval_sql import CONTEXT_FILE, load_questions, results_match, run_sql
+from ais_tool import PROJECT_DIR, connect, extract_sql, schema_context
+from eval_sql import EVAL_DIR, load_questions, results_match, run_sql
 import places as gazetteer
 from sql_templates import ALL_PLACES, EXCLUDED_DATE_RE, TEMPLATES, Sampler, d_text, place_text
 
@@ -259,7 +259,7 @@ def agreeing(sqls: list[str], results: list[dict], min_agree: int) -> tuple[str,
 def cmd_freeform(args) -> None:
     rng = random.Random(args.seed)
     sampler = Sampler(connect(), rng, args.days)
-    context = CONTEXT_FILE.read_text()
+    context = schema_context()
     known = gazetteer.load(include_learned=False)
 
     # The teacher only sees the places in play: the sampled one when writing questions, the
@@ -435,10 +435,13 @@ def cmd_planner(args) -> None:
 
 
 def cmd_export(args) -> None:
-    context = CONTEXT_FILE.read_text()
+    context = schema_context()
+    # No training question may repeat a test question (every set in eval/, incl. the group's).
+    test_sets = [load_questions()] + [load_questions(f)
+                                      for f in sorted(EVAL_DIR.glob("*_questions.json"))]
     eval_texts = {
         " ".join(t.lower().split())
-        for q in load_questions() for t in [q["question"], *q.get("paraphrases", [])]
+        for qs in test_sets for q in qs for t in [q["question"], *q.get("paraphrases", [])]
     }
     export_dir = args.export_dir or args.out_dir
     targets = [export_dir / "train.jsonl", export_dir / "val.jsonl"]
