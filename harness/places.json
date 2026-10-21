@@ -418,6 +418,40 @@
    "source": "manual"
   },
   {
+   "name": "Great Belt Bridge",
+   "aliases": [
+    "Storebæltsbroen",
+    "Storebaeltsbroen",
+    "Storebælt Bridge",
+    "Great Belt bridges"
+   ],
+   "kind": "area",
+   "box": [
+    10.855,
+    55.3,
+    11.09,
+    55.355
+   ],
+   "source": "manual"
+  },
+  {
+   "name": "Little Belt bridges",
+   "aliases": [
+    "Lillebæltsbroen",
+    "Lillebaeltsbroen",
+    "Little Belt Bridge",
+    "Lillebælt bridges"
+   ],
+   "kind": "area",
+   "box": [
+    9.66,
+    55.495,
+    9.74,
+    55.525
+   ],
+   "source": "manual"
+  },
+  {
    "name": "Barth",
    "aliases": [
     "DEBBH"

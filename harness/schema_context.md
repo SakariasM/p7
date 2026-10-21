@@ -32,6 +32,8 @@ Rules:
   anchor are nav_status values: nav_status = 'Moored', nav_status = 'At anchor'.
 - A month means all its days: date BETWEEN DATE '2026-01-01' AND DATE '2026-01-31'.
 - Danish waters, or no place named: no lon/lat filter.
+- An average length, width or draught counts each vessel once: average the per-vessel
+  value (max(length) per mmsi); lengths over 450 m are AIS errors, leave them out.
 - Dates without a year are in the data range above. Queries over more than a few days must
   also filter on mmsi, an area or ship_type.
 

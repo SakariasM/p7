@@ -134,6 +134,19 @@ def results_match(ref_rows: list[list], pred_rows: list[list]) -> bool:
 _NUMBER_RE = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 
 
+_NONE_RE = re.compile(r"\b(no|none|zero|not any|nobody)\b")
+# Questions whose right outcome is not a number (group test set, eval/group_questions.json):
+#   expect "reply"   the router answers without a query (off-topic, maps, not in AIS data)
+#   expect "clarify" the answer asks for what is missing (e.g. placeholder coordinates)
+#   expect "skip"    not scored (route questions, to be handled by another part of the project)
+# A reply question is also answered right when another route says the data cannot answer it.
+CANNOT_RE = re.compile(r"\b(?:not (?:in|included|include|contain|available|supported)|does not "
+                       r"(?:include|contain|have)|cannot|can't|only answer|no information)\b",
+                       re.IGNORECASE)
+CLARIFY_RE = re.compile(r"\b(specify|provide|clarify|which|unknown|not (?:properly )?defined)\b",
+                        re.IGNORECASE)
+
+
 def answer_has_reference(answer: str, ref_rows: list[list]) -> bool:
     """Every reference value appears in the answer text (heuristic, see the module doc)."""
     if not answer or not ref_rows or len(ref_rows) > 10:
@@ -143,6 +156,8 @@ def answer_has_reference(answer: str, ref_rows: list[list]) -> bool:
     for value in (v for row in ref_rows for v in row):
         if value is None or isinstance(value, bool):
             continue
+        if isinstance(value, (int, float)) and value == 0 and _NONE_RE.search(text):
+            continue  # "there were no vessels" states a zero count
         if isinstance(value, (int, float)):
             # A negative change is usually written as "decreased by 2", so |value| also counts.
             targets = {value, abs(value)}
@@ -204,7 +219,7 @@ class ReferenceCosts:
     """Work and time of each question's reference SQL, measured once per eval run."""
 
     def __init__(self, questions: list[dict], repeats: int):
-        self._sql = {q["id"]: q["sql"] for q in questions}
+        self._sql = {q["id"]: q["sql"] for q in questions if "sql" in q}
         self._repeats = repeats
         self._costs: dict[str, dict] = {}
 
@@ -235,6 +250,8 @@ def cmd_answers(args) -> None:
         sys.exit(f"{args.answers} exists; use --overwrite to recompute it")
     answers = {}
     for q in load_questions(args.questions):
+        if q.get("expect", "answer") != "answer":
+            continue
         result = run_sql(q["sql"])
         if "error" in result:
             sys.exit(f"{q['id']}: {result['error']}")
@@ -330,12 +347,33 @@ def cmd_agent(args) -> None:
 
     records = []
     for q in questions:
+        expect = q.get("expect", "answer")
+        if expect == "skip":
+            continue
         for i, text in enumerate([q["question"], *q.get("paraphrases", [])]):
             t = time.time()
             try:
                 trace = run(text, return_trace=True)
             except Exception as e:  # endpoint down, context too long, ...
                 trace = {"answer": f"agent error: {e}", "tool_calls": []}
+            if expect != "answer":
+                text = trace["answer"] or ""
+                ok = ((trace.get("route") == "reply" or bool(CANNOT_RE.search(text)))
+                      if expect == "reply" else bool(CLARIFY_RE.search(text)))
+                records.append({
+                    "id": q["id"], "variant": i, "question": text, "tags": q["tags"],
+                    "expect": expect, "correct": ok, "answer_ok": ok, "sql_seconds": 0.0,
+                    "route": trace.get("route"), "ref_cost": None, "query_cost": None,
+                    "points": 100.0 if ok else 0.0, "f1": 1.0 if ok else 0.0, "ves": 0.0,
+                    "work_ratio": None,
+                    "answer": trace["answer"], "plan": trace.get("plan"),
+                    "calls": [{"request": c.get("request"), "sql": c["sql"],
+                               "error": c["result"].get("error")} for c in trace["tool_calls"]],
+                    "seconds": round(time.time() - t, 1),
+                })
+                print(f"{expect} {'ok' if ok else '--'}  {q['id']:24} v{i}  route "
+                      f"{trace.get('route')}, {records[-1]['seconds']}s", flush=True)
+                continue
             results = [
                 json.loads(json.dumps(c["result"], default=str)) for c in trace["tool_calls"]
             ]

@@ -1,0 +1,222 @@
+{
+ "group_02": {
+  "columns": [
+   "n"
+  ],
+  "rows": [
+   [
+    6
+   ]
+  ]
+ },
+ "group_03": {
+  "columns": [
+   "n"
+  ],
+  "rows": [
+   [
+    3
+   ]
+  ]
+ },
+ "group_05": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    16
+   ]
+  ]
+ },
+ "group_06": {
+  "columns": [
+   "more_in",
+   "great_belt_bridge",
+   "little_belt_bridges"
+  ],
+  "rows": [
+   [
+    "Great Belt Bridge",
+    1037,
+    94
+   ]
+  ]
+ },
+ "group_07": {
+  "columns": [
+   "avg_sog"
+  ],
+  "rows": [
+   [
+    5.58
+   ]
+  ]
+ },
+ "group_08": {
+  "columns": [
+   "avg_length_m"
+  ],
+  "rows": [
+   [
+    86.9
+   ]
+  ]
+ },
+ "group_09": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    0
+   ]
+  ]
+ },
+ "group_10": {
+  "columns": [
+   "more_in",
+   "aalborg",
+   "esbjerg"
+  ],
+  "rows": [
+   [
+    "Esbjerg",
+    10,
+    58
+   ]
+  ]
+ },
+ "group_11": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    467
+   ]
+  ]
+ },
+ "group_13": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    0
+   ]
+  ]
+ },
+ "group_16": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    0
+   ]
+  ]
+ },
+ "group_19": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    0
+   ]
+  ]
+ },
+ "group_20": {
+  "columns": [
+   "more_in",
+   "skagen",
+   "frederikshavn"
+  ],
+  "rows": [
+   [
+    "Skagen",
+    95,
+    32
+   ]
+  ]
+ },
+ "group_21": {
+  "columns": [
+   "per_day"
+  ],
+  "rows": [
+   [
+    4904.0
+   ]
+  ]
+ },
+ "group_22": {
+  "columns": [
+   "name",
+   "length"
+  ],
+  "rows": [
+   [
+    "AL NEFUD",
+    400
+   ],
+   [
+    "AL ZUBARA",
+    400
+   ],
+   [
+    "BANGKOK EXPRESS",
+    400
+   ],
+   [
+    "CMA CGM CONCORDE",
+    400
+   ],
+   [
+    "CMA CGM JEAN MERMOZ",
+    400
+   ],
+   [
+    "CMA CGM SORBONNE",
+    400
+   ],
+   [
+    "CMA CGM VENDOME",
+    400
+   ],
+   [
+    "COSCO CAPRICORN",
+    400
+   ],
+   [
+    "COSCO PLANET",
+    400
+   ],
+   [
+    "COSCO SAGITTARIUS",
+    400
+   ]
+  ]
+ },
+ "group_25": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    285
+   ]
+  ]
+ },
+ "group_26": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    51746
+   ]
+  ]
+ }
+}

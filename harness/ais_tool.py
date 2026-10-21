@@ -58,7 +58,8 @@ CREATE VIEW vessel_positions AS {_VESSEL_POSITIONS};
 
 DEFAULT_ROW_LIMIT = 1000
 MAX_ROW_LIMIT = 20000
-QUERY_TIMEOUT_SECONDS = 30
+# P7_QUERY_TIMEOUT raises it for offline jobs, e.g. computing reference answers over the year.
+QUERY_TIMEOUT_SECONDS = int(os.environ.get("P7_QUERY_TIMEOUT", "30"))
 
 _BANNED_KEYWORDS = [
     "insert", "update", "delete", "drop", "alter", "create", "attach",

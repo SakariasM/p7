@@ -33,7 +33,8 @@ from openai import OpenAI
 import functions
 import places
 from agent import MODEL_PATH, get_base_url
-from ais_tool import DATE_RANGE, PROJECT_DIR, extract_sql, query_ais_data
+from ais_tool import (_DATES, DATE_RANGE, DEFAULT_ROW_LIMIT, PROJECT_DIR, extract_sql,
+                      query_ais_data)
 
 STUDENT_ENDPOINT_FILE = PROJECT_DIR / "serving" / "student_endpoint.txt"
 STUDENT_MODEL = "sql-student"  # --served-model-name in slurm/serve_student.slurm
@@ -73,8 +74,11 @@ How to work:
    - words to spell out: harbored, docked or in port at a place = vessels with speed
      under 0.5 knots inside that place (moored and at anchor are navigational statuses:
      keep those words); a month (e.g. January 2026) = every day of
-     it, so say "from 1 to 31 January 2026"; the size of a vessel = its length (and width);
-     Danish waters, or no place given = the whole data, so name no place
+     it, so say "from 1 to 31 January 2026"; the size of a vessel = its length (and width),
+     and an average size or length counts each vessel once;
+     Danish waters, or no place given = the whole data, so name no place; ships passing
+     under a bridge = moving vessels (speed at least 1 knot) inside the bridge's place, e.g.
+     the Great Belt Bridge or the Little Belt bridges
    - a request may cover up to a month only if it also names a ship type, a place or a
      vessel; otherwise ask per day or per week. To count distinct vessels over several
      requests, ask each for the list of vessels (MMSI) and combine the lists yourself (a
@@ -96,8 +100,9 @@ How to work:
    request again gives the same result.
 6. Answer concisely with the numbers, dates and places, describing each number by what the
    SQL actually computed (e.g. distinct vessels, not reports). Say if a step failed or data
-   was missing. Never invent numbers. No ship is longer than about 400 m: longer lengths
-   in the data are AIS errors, so say that rather than reporting them as real ships.
+   was missing. Never invent numbers. No ship is longer than about 400 m: lengths over 450
+   m are AIS errors, so for the largest or longest ship ask again for vessels at most 450 m
+   long, and mention that longer values were left out as errors.
 7. If you counted cruise ships, say clearly in the answer that you assumed passenger ships
    of 250 m or longer are cruise ships, and that AIS has no cruise category, so the number
    cannot be certain (large ferries may be included, small cruise ships missed)."""
@@ -270,7 +275,9 @@ def spell_out(request: str) -> str:
     as its first day) and 'in Danish waters' -> nothing (the whole data, no place)."""
     def month(m: re.Match) -> str:
         i = [n.lower() for n in _MONTH_NAMES].index(m.group(1).lower()) + 1
-        year = int(m.group(2)) if m.group(2) else (2025 if i >= 10 else 2026)
+        year = int(m.group(2)) if m.group(2) else next(
+            (y for y in range(DATA_LAST[0], DATA_FIRST[0] - 1, -1)
+             if DATA_FIRST <= (y, i) <= DATA_LAST), DATA_LAST[0])
         last = (date(year + (i == 12), i % 12 + 1, 1) - timedelta(days=1)).day
         name = _MONTH_NAMES[i - 1]
         return f"from 1 {name} {year} to {last} {name} {year}"
@@ -302,9 +309,11 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
                            f"{', '.join(sorted(VALID_VALUES[column]))}. Rephrase the request "
                            f"with one of them."}
     elif stray:
-        result = {"error": f"The SQL used an area {list(stray[0])} that is not a place named in "
-                           f"the request ({', '.join(p.name for p in named) or 'none'}). Check "
-                           f"places with find_place and name them, or give the box as numbers."}
+        # Name the right boxes: the planner once copied the wrong box from this message.
+        known_boxes = "; ".join(places.format_place(p).strip() for p in named)
+        result = {"error": "The SQL used an area that is not a place named in the request. "
+                           + (f"The named places are {known_boxes}. Ask again naming the place."
+                              if named else "Check places with find_place and name them.")}
     else:
         result = query_ais_data(sql)
     return {"request": request, "places": [p.name for p in named], "sql": sql, "result": result}
@@ -316,13 +325,18 @@ def for_planner(step: dict) -> dict:
     if "error" in result:
         return {"sql": step["sql"], "error": result["error"]}
     rows = result["rows"]
-    return {
+    view = {
         "sql": step["sql"],
         "columns": result["columns"],
         "rows": rows[:MAX_ROWS_FOR_PLANNER],
         "row_count": len(rows),
         "rows_shown": min(len(rows), MAX_ROWS_FOR_PLANNER),
     }
+    if result.get("truncated") or len(rows) == DEFAULT_ROW_LIMIT:
+        # A list cut off at the row limit once became the answer "1000 vessels".
+        view["warning"] = (f"the result stopped at the row limit ({len(rows)} rows), so there "
+                           f"may be more: ask for a count instead of a list")
+    return view
 
 
 def run_student_only(question: str, return_trace: bool = False, **_):
@@ -511,7 +525,7 @@ Reply with only JSON: {"route": "direct", "plan" or "reply", "reason": "<a few w
 
 REPLY_PROMPT = """\
 You are the assistant of a question-answering system over AIS position reports from ships in
-Danish waters, 1 October 2025 to 30 September 2026 (UTC). The data has, per report: time,
+Danish waters, <PERIOD>. The data has, per report: time,
 position, speed, course, heading, navigational status, and the vessel's MMSI (which also
 gives its flag country), name, call sign, IMO, ship type, length, width, draught,
 destination and ETA as sent by the crew.
@@ -525,11 +539,11 @@ three sentences:
 - maps, heatmaps or drawn routes: say visualisation is not supported yet and offer the
   numbers behind it (e.g. counts or times) instead.
 - times outside the data: give the period the data covers and suggest asking about a date
-  inside it (the latest day is 30 September 2026).
+  inside it (the latest day is <LAST>).
 - speculation about crimes or private persons: do not speculate or accuse anyone; you may
   offer the vessel's factual movements in the data period instead.
-Do not invent numbers. Any example question you suggest must use a date between 1 October 2025
-and 30 September 2026, e.g. 12 March 2026.
+Do not invent numbers. Any example question you suggest must use a date in <PERIOD>,
+e.g. <EXAMPLE>.
 
 Question: {question}"""
 
@@ -546,11 +560,22 @@ Rows: {rows}"""
 
 # --- questions about times outside the data -----------------------------------------------
 # Checked in code before routing: the student maps a year it never saw onto the data (asked
-# about 1 July 2025 it queried 1 July 2026), so such questions must not reach a query.
-DATA_FIRST, DATA_LAST = (2025, 10), (2026, 9)  # (year, month) of the first and last day
-# What "now", "currently", "yesterday" ... mean. None: the data has no present, so these get a
-# reply giving the period. Set to a date (e.g. "2026-09-30") to read them relative to it.
-CURRENT_DAY = None
+# about 1 July 2025 it queried 1 July 2026), so such questions must not reach a query. The
+# period comes from the data folder (ais_tool._DATES), so adding days needs no code change.
+FIRST_DAY, LAST_DAY = date.fromisoformat(_DATES[0]), date.fromisoformat(_DATES[-1])
+DATA_FIRST, DATA_LAST = (FIRST_DAY.year, FIRST_DAY.month), (LAST_DAY.year, LAST_DAY.month)
+
+
+def day_text(d: date) -> str:
+    return f"{d.day} {_MONTH_NAMES[d.month - 1]} {d.year}"
+
+
+PERIOD_TEXT = f"{day_text(FIRST_DAY)} to {day_text(LAST_DAY)} (UTC)"
+EXAMPLE_DAY = day_text(FIRST_DAY + (LAST_DAY - FIRST_DAY) / 2)
+# What "now", "currently", "yesterday", "last week" ... mean: the latest day in the data (group
+# decision 2026-10-21; there are no live positions). None makes them get a reply giving the
+# period instead.
+CURRENT_DAY: date | None = LAST_DAY
 _MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
 _MONTH_YEAR_RE = re.compile(
@@ -560,13 +585,54 @@ _MONTH_YEAR_RE = re.compile(
     r"[a-z]*\.?,?\s+(\d{4})\b"
     r"|\b(\d{4})-(\d{1,2})(?:-\d{1,2})?\b", re.IGNORECASE)
 _YEAR_RE = re.compile(r"\b(19\d\d|20\d\d)\b")
-_SMALL = r"(?:\d+|two|three|four|five|six|seven|few|couple of)"
+_NUMBER_WORDS = {"a": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+                 "seven": 7, "few": 3, "couple of": 2}
+_SMALL = r"(\d+|two|three|four|five|six|seven|few|couple of)"
 _RELATIVE_RE = re.compile(
-    rf"\b(right now|now|currently|current|at the moment|at present|today|tonight|yesterday"
-    rf"|this (?:morning|week|month)|last (?:night|week|month|{_SMALL} (?:days|hours|weeks))"
-    rf"|(?:the )?past (?:week|month|{_SMALL} (?:days|hours|weeks)))\b(?!\s+of\b)",
-    re.IGNORECASE)
-PERIOD_TEXT = "1 October 2025 to 30 September 2026 (UTC)"
+    rf"(?:,?\s*\b(?:in|during|over|for|within|from)\s+the\s+)?\b("
+    rf"right now|now|currently|current|at the moment|at present|today|tonight|this morning"
+    rf"|yesterday|last night|this week|this month|(?:last|past) (?:week|month)"
+    rf"|(?:last|past) {_SMALL} (days|weeks|hours))\b(?!\s+of\b)", re.IGNORECASE)
+
+
+def _relative_period(m: re.Match, today: date) -> tuple[date, date]:
+    phrase = m.group(1).lower()
+    if phrase in ("yesterday", "last night"):
+        return today - timedelta(days=1), today - timedelta(days=1)
+    if phrase == "this week":
+        return today - timedelta(days=today.weekday()), today
+    if phrase == "this month":
+        return today.replace(day=1), today
+    if phrase in ("last week", "past week"):
+        return today - timedelta(days=6), today
+    if phrase == "past month":
+        return today - timedelta(days=29), today
+    if phrase == "last month":
+        last = today.replace(day=1) - timedelta(days=1)
+        return last.replace(day=1), last
+    if m.group(2):
+        n = int(m.group(2)) if m.group(2).isdigit() else _NUMBER_WORDS[m.group(2).lower()]
+        unit = m.group(3).lower()
+        days = 7 * n if unit == "weeks" else (n if unit == "days" else 1)
+        return today - timedelta(days=days - 1), today
+    return today, today  # now, currently, today, ...
+
+
+def resolve_relative(question: str) -> tuple[str, str | None]:
+    """"How many ships are currently in Skagen?" -> "How many ships are in Skagen on 30
+    September 2026?" with CURRENT_DAY the latest day, and a note saying so for the answer."""
+    m = _RELATIVE_RE.search(question)
+    if CURRENT_DAY is None or not m:
+        return question, None
+    d0, d1 = _relative_period(m, CURRENT_DAY)
+    when = f"on {day_text(d0)}" if d0 == d1 else f"from {day_text(d0)} to {day_text(d1)}"
+    rest = (question[:m.start()] + question[m.end():]).strip()
+    rest = re.sub(r"\s+([?.!,])", r"\1", re.sub(r"\s{2,}", " ", rest))
+    end = re.search(r"[?.!]*$", rest)
+    rewritten = f"{rest[:end.start()].rstrip(', ')} {when}{end.group(0) or '?'}"
+    note = (f'Note: "{m.group(1)}" is read as {when.split(" ", 1)[1]}, the latest data available '
+            f"(the data covers {PERIOD_TEXT}; there are no live positions).")
+    return rewritten, note
 
 
 def period_problem(question: str) -> tuple[str | None, str | None]:
@@ -577,7 +643,7 @@ def period_problem(question: str) -> tuple[str | None, str | None]:
         if m:
             return (f'The data covers {PERIOD_TEXT} and has no live positions, so I cannot '
                     f'answer for "{m.group(1)}". Ask about a date in that period, for example '
-                    f"30 September 2026, the latest day.", None)
+                    f"{day_text(LAST_DAY)}, the latest day.", None)
     outside, inside = [], []
     for m in _MONTH_YEAR_RE.finditer(question):
         if m.group(5):
@@ -593,17 +659,46 @@ def period_problem(question: str) -> tuple[str | None, str | None]:
         return None, (f"Note: the data covers {PERIOD_TEXT}; {', '.join(outside)} lies outside "
                       f"it, so only the part inside the period is answered.")
     rest = _MONTH_YEAR_RE.sub(" ", question)
-    years = {int(y) for y in _YEAR_RE.findall(rest)}
+    years = sorted({int(y) for y in _YEAR_RE.findall(rest)})
     if years and all(y < DATA_FIRST[0] or y > DATA_LAST[0] for y in years):
         return (f"The data covers {PERIOD_TEXT}, so there is no data for "
-                f"{' or '.join(map(str, sorted(years)))}. Ask about a date in that period.", None)
-    notes = {2025: "only October-December 2025", 2026: "only January-September 2026"}
-    partial = [notes[y] for y in sorted(years) if y in notes]
+                f"{' or '.join(map(str, years))}. Ask about a date in that period.", None)
+    partial = []
+    for y in years:
+        first = (y, 1) if (y, 1) >= DATA_FIRST else DATA_FIRST
+        last = (y, 12) if (y, 12) <= DATA_LAST else DATA_LAST
+        if first[0] == y == last[0] and (first[1], last[1]) != (1, 12):
+            partial.append(f"{y} only {_MONTH_NAMES[first[1] - 1]}-{_MONTH_NAMES[last[1] - 1]} "
+                           f"{y}")
     if partial:
-        return None, (f"Note: the data covers {PERIOD_TEXT}, so for "
-                      f"{' and '.join(str(y) for y in sorted(years))} this covers "
-                      f"{' and '.join(partial)}.")
+        return None, (f"Note: the data covers {PERIOD_TEXT}, so this covers "
+                      f"{'; '.join(partial).replace(' only ', ': only ')}.")
     return None, None
+
+
+# "Did Storebaelt or Lillebaelt have more ships pass under them?" means the bridges: ships that
+# moved through the box around the Great Belt Bridge / the Little Belt bridges (group
+# definition 2026-10-21), not the whole straits.
+_UNDER_RE = re.compile(r"\b(?:pass(?:ed|es|ing)?|go(?:es|ing)?|went|sail(?:ed|s|ing)?|"
+                       r"travel(?:led|ed|s|ling)?)\s+(?:\w+\s+){0,2}under\b|\bbridges?\b",
+                       re.IGNORECASE)
+_BRIDGE_NAMES = [
+    (re.compile(r"\b(?:the\s+)?(?:storeb(?:æ|ae|a)lt|great\s+belt)(?!\s+bridge)(?:s?broen)?\b",
+                re.IGNORECASE), "the Great Belt Bridge"),
+    (re.compile(r"\b(?:the\s+)?(?:lilleb(?:æ|ae|a)lt|little\s+belt)(?!\s+bridge)(?:s?broen)?\b",
+                re.IGNORECASE), "the Little Belt bridges"),
+]
+
+
+def bridges_named(question: str) -> str:
+    """Storebaelt / Lillebaelt -> their bridges when the question is about passing under."""
+    if not _UNDER_RE.search(question):
+        return question
+    for pattern, name in _BRIDGE_NAMES:
+        question = pattern.sub(name, question)
+    question = re.sub(r"\bships?\s+pass\s+under\b", "moving ships pass under", question,
+                      count=1, flags=re.IGNORECASE)
+    return question
 
 
 _SHIP_WORDS_RE = re.compile(
@@ -614,14 +709,27 @@ _DATE_WORDS_RE = re.compile(
     re.IGNORECASE)
 
 
+_COUNT_WORDS_RE = re.compile(
+    r"\b(how many|number of|count|total|average|mean|largest|longest|biggest|smallest|"
+    r"fastest|slowest|busiest)\b", re.IGNORECASE)
+_VISUAL_RE = re.compile(r"\b(heat ?maps?|maps?|charts?|plots?|graphs?|draw|visuali[sz]\w*)\b",
+                        re.IGNORECASE)
+VISUAL_REPLY = ("Visualisation (maps, heatmaps, charts or drawn routes) is not supported yet. I "
+                "can give the numbers behind it instead, e.g. how many ships left a port on each "
+                "day, or their departure times.")
+
+
 def clearly_data(question: str) -> bool:
     """Names a known place (or Danish waters), ships and a date or time: a data question
     whatever the router thinks (it sent "vessels at anchor in Skagen at 02:00 UTC on 24
     September 2026" to reply)."""
     has_place = bool(places.mentioned(question, places.load())) or bool(
         re.search(r"danish waters", question, re.IGNORECASE))
-    return has_place and bool(_SHIP_WORDS_RE.search(question)) and bool(
-        _DATE_WORDS_RE.search(question))
+    ships = bool(_SHIP_WORDS_RE.search(question))
+    # Counting or measuring ships is always a data question (the router once sent "What is the
+    # total number of ships you have data on?" to reply).
+    return ships and ((has_place and bool(_DATE_WORDS_RE.search(question)))
+                      or bool(_COUNT_WORDS_RE.search(question)))
 
 
 def route(planner: OpenAI, question: str) -> tuple[str, str]:
@@ -653,18 +761,28 @@ def run_routed(question: str, max_turns: int = 10, enable_thinking: bool = False
     questions, while the planner only pays off when a question needs several steps.
     Questions no query can answer (off-topic, not in AIS data, maps, outside the data period,
     speculation about people) get a short reply from the 8B without any query."""
+    asked = question
+    question, relative_note = resolve_relative(question)
+    question = bridges_named(question)
     period_reply, note = period_problem(question)
+    if not period_reply and _VISUAL_RE.search(question):
+        period_reply = VISUAL_REPLY
     if period_reply:
+        reason = ("visualisation" if period_reply == VISUAL_REPLY else "outside the data period")
         trace = {"answer": period_reply, "plan": None, "tool_calls": [], "place_calls": [],
-                 "route": "reply", "route_reason": "outside the data period"}
+                 "route": "reply", "route_reason": reason,
+                 "question_as_read": question}
         return trace if return_trace else period_reply
+    note = "\n".join(n for n in (relative_note, note) if n)
     planner = OpenAI(base_url=get_base_url(), api_key="not-needed")
     choice, reason = route(planner, question)
     if choice == "reply" and clearly_data(question):
-        choice, reason = "plan", f"not reply: names a place, ships and a date ({reason})"
+        choice, reason = "plan", f"not reply: a question about ship data ({reason})"
     trace = _run_route(planner, question, choice, reason, max_turns, enable_thinking)
     if note:
         trace["answer"] = f"{trace['answer']}\n\n{note}"
+    if question != asked:
+        trace["question_as_read"] = question
     return trace if return_trace else trace["answer"]
 
 
@@ -673,8 +791,9 @@ def _run_route(planner: OpenAI, question: str, choice: str, reason: str, max_tur
     if choice == "reply":
         response = planner.chat.completions.create(
             model=MODEL_PATH,
-            messages=[{"role": "user", "content": REPLY_PROMPT.format(
-                reason=reason, question=question)}],
+            messages=[{"role": "user", "content": REPLY_PROMPT.replace("<PERIOD>", PERIOD_TEXT)
+                       .replace("<LAST>", day_text(LAST_DAY)).replace("<EXAMPLE>", EXAMPLE_DAY)
+                       .format(reason=reason, question=question)}],
             temperature=0,
             max_tokens=200,
             extra_body={"chat_template_kwargs": {"enable_thinking": False}},
