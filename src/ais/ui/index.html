@@ -483,7 +483,7 @@ $("route-btn").onclick = async () => {
     const first = r.legs[0].geometry.coordinates[0], last = r.legs.at(-1).geometry.coordinates.at(-1);
     L.marker([first[1], first[0]], { title: "Start" }).bindTooltip("Start " + fmt(r.legs[0].start_ts)).addTo(pathLayer);
     L.marker([last[1], last[0]], { title: "End" }).bindTooltip("End " + fmt(r.legs.at(-1).end_ts)).addTo(pathLayer);
-    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
+    map.flyToBounds(bounds, { padding: [40, 40], maxZoom: 13, duration: 1.6 });
     $("route-legend").hidden = false;
     setupPlayer(r.legs);
     const nm = r.legs.reduce((a, l) => a + l.distance_m, 0) / 1852;
@@ -500,16 +500,24 @@ $("route-btn").onclick = async () => {
 // hints (harness/map_hints.py) say what it is about; the map then zooms to the places, sets
 // the time and filters, highlights the vessels, or opens a vessel's route.
 let highlight = new Set();
-const ROUTES = { direct: "answered by the SQL specialist", plan: "answered by the planner",
-  "direct->plan": "answered by the planner (after a direct try)", reply: "no query needed" };
 const day = 86400e3;
+
+// Glide to the bounds (zooming out and in on the way, like flyTo) and resolve when the map
+// has stopped, so the ships are then loaded for the new view, not the old one.
+function flyTo(bounds) {
+  return new Promise(resolve => {
+    map.once("moveend", () => resolve());
+    map.flyToBounds(bounds, { padding: [30, 30], maxZoom: 12, duration: 1.6 });
+    setTimeout(resolve, 2500);  // a promise resolves once; this only matters if moveend never comes
+  });
+}
 
 async function showOnMap(h) {
   highlight = new Set((h.vessels || []).map(v => v.mmsi));
   if (h.places && h.places.length) {
     const b = L.latLngBounds([]);
     for (const p of h.places) { b.extend([p.box[1], p.box[0]]); b.extend([p.box[3], p.box[2]]); }
-    map.fitBounds(b, { padding: [30, 30], maxZoom: 12 });
+    await flyTo(b);
   }
   const when = h.at || h.start;
   if (when) $("at").value = when.slice(0, 16);
@@ -551,7 +559,7 @@ async function ask() {
     $("ask-answer").textContent = body.answer;
     $("ask-answer").hidden = false;
     const secs = ((performance.now() - t0) / 1000).toFixed(0);
-    setStatus("ask-status", `${ROUTES[body.route] || "answered"} · ${secs} s`);
+    setStatus("ask-status", `Answered in ${secs} s`);
     await showOnMap(body.map || {});
   } catch (e) {
     setStatus("ask-status", e.message, true);
