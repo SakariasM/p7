@@ -82,7 +82,8 @@ How to work:
    - places by name, checked first with find_place (see 3), or as a lon/lat box
    - vessel names in capitals as broadcast (e.g. TYCHO BRAHE); ship types such as Cargo,
      Fishing, Passenger, Tanker, Sailing, Tug, Pleasure, Pilot, HSC, SAR, Military.
-     Cruise ships are not an AIS type: ask for "passenger ships at least 250 m long"
+     Ferries are Passenger ships: ask for "passenger ships". Cruise ships are not an AIS
+     type: ask for "passenger ships at least 250 m long"
    - words to spell out: harbored, docked or in port at a place = vessels with speed
      under 0.5 knots inside that place (moored and at anchor are navigational statuses:
      keep those words); a month (e.g. January 2026) = every day of
@@ -109,10 +110,13 @@ How to work:
 5. Check each result against its request and SQL. If it is an error, empty or implausible,
    rephrase the request more simply or split it, at most twice per step. Sending the same
    request again gives the same result.
-6. Answer concisely in plain language with the numbers, dates and places, describing each
-   number by what was actually counted (ships, not reports). Do not mention SQL, queries,
+6. Answer concisely in plain language and plain text (no Markdown) with the numbers, dates
+   and places, describing each number by what was actually counted (ships, not reports).
+   Do not mention how the data was found (entries, reports, records), SQL, queries,
    requests, tools, the assistant or result tables in the answer, and do not list MMSI
-   numbers unless the user asks for them. Say if a step failed or data was missing. Never invent numbers. No ship is longer than about 400 m: longer lengths are
+   numbers unless the user asks for them. For a list of ships, always give how many and
+   use their names: up to 10, name them all; more, give the count, a few examples, and
+   offer to list them all. Say if a step failed or data was missing. Never invent numbers. No ship is longer than about 400 m: longer lengths are
    AIS errors, so for the largest or longest ship ask again for vessels at most 400 m long,
    and mention that longer values were left out as errors.
 7. If you counted cruise ships, give the answer first, then say clearly in one or two
@@ -302,6 +306,13 @@ def spell_out(request: str) -> str:
     return _AIS_DATA_RE.sub("the data", request)
 
 
+# Words for ship types that are not AIS values, and the value that covers them.
+TYPE_SYNONYMS = {"ferry": "Passenger", "ferries": "Passenger", "cruise": "Passenger",
+                 "cruise ship": "Passenger", "container": "Cargo", "container ship": "Cargo",
+                 "freighter": "Cargo", "yacht": "Pleasure", "sailboat": "Sailing",
+                 "trawler": "Fishing", "warship": "Military", "navy": "Military"}
+
+
 def ask_data(student: OpenAI, request: str, session: list[places.Place] | None = None,
              model: str = STUDENT_MODEL) -> dict:
     """The SQL writer (the student, or with model=MODEL_PATH the 8B, for comparison) writes SQL
@@ -323,9 +334,11 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
     bad = invalid_values(sql)
     if bad:
         column, value = bad[0]
-        result = {"error": f"'{value}' is not a {column} value in the data. Valid values: "
-                           f"{', '.join(sorted(VALID_VALUES[column]))}. Rephrase the request "
-                           f"with one of them."}
+        likely = TYPE_SYNONYMS.get(value.lower()) if column == "ship_type" else None
+        result = {"error": f"'{value}' is not a {column} value in the data. "
+                           + (f"Ask again with {column} {likely} instead. " if likely else "")
+                           + f"Valid values: {', '.join(sorted(VALID_VALUES[column]))}. "
+                             f"Rephrase the request yourself; do not ask the user."}
     elif stray:
         # Name the right boxes: the planner once copied the wrong box from this message.
         known_boxes = "; ".join(places.format_place(p).strip() for p in named)
@@ -333,8 +346,41 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
                            + (f"The named places are {known_boxes}. Ask again naming the place."
                               if named else "Check places with find_place and name them.")}
     else:
-        result = query_ais_data(sql)
+        result = with_total(sql, with_names(query_ais_data(sql)))
     return {"request": request, "places": [p.name for p in named], "sql": sql, "result": result}
+
+
+def with_total(sql: str, result: dict) -> dict:
+    """The exact number of rows when a list stopped at the row limit (DEFAULT_ROW_LIMIT, added
+    to queries without a LIMIT of their own): the same query counted, as total_rows. Answers
+    then give the real count however long the list is; the rows stay the first ones."""
+    if ("error" in result or len(result.get("rows") or []) < DEFAULT_ROW_LIMIT
+            or re.search(r"\blimit\s+\d+\s*;?\s*$", sql, re.IGNORECASE)):
+        return result
+    counted = query_ais_data(f"SELECT count(*) AS n FROM ({sql.rstrip().rstrip(';')})")
+    if "error" in counted or not counted.get("rows"):
+        return result
+    return {**result, "total_rows": counted["rows"][0][0]}
+
+
+def with_names(result: dict) -> dict:
+    """Add a name column to a result that lists vessels by MMSI only, from vessel_days (the
+    most common name over the data), so answers and the map can name the ships. The SQL
+    itself is unchanged; extra columns do not affect the evaluation."""
+    columns = [str(c).lower() for c in result.get("columns") or []]
+    if "error" in result or "mmsi" not in columns or "name" in columns or not HAVE_VESSEL_DAYS:
+        return result
+    i = columns.index("mmsi")
+    ids = sorted({r[i] for r in result["rows"] if isinstance(r[i], int)})
+    if not ids:
+        return result
+    names = query_ais_data(f"SELECT mmsi, mode(name) FROM vessel_days WHERE mmsi IN "
+                           f"({', '.join(map(str, ids))}) GROUP BY mmsi LIMIT {len(ids)}")
+    if "error" in names:
+        return result
+    by_mmsi = dict(names["rows"])
+    return {**result, "columns": [*result["columns"], "name"],
+            "rows": [[*r, by_mmsi.get(r[i])] for r in result["rows"]]}
 
 
 def for_planner(step: dict) -> dict:
@@ -347,10 +393,10 @@ def for_planner(step: dict) -> dict:
         "sql": step["sql"],
         "columns": result["columns"],
         "rows": rows[:MAX_ROWS_FOR_PLANNER],
-        "row_count": len(rows),
+        "row_count": result.get("total_rows", len(rows)),
         "rows_shown": min(len(rows), MAX_ROWS_FOR_PLANNER),
     }
-    if result.get("truncated") or len(rows) == DEFAULT_ROW_LIMIT:
+    if "total_rows" not in result and (result.get("truncated") or len(rows) == DEFAULT_ROW_LIMIT):
         # A list cut off at the row limit once became the answer "1000 vessels".
         view["warning"] = (f"the result stopped at the row limit ({len(rows)} rows), so there "
                            f"may be more: ask for a count instead of a list")
@@ -564,17 +610,29 @@ e.g. <EXAMPLE>.
 
 Question: {question}"""
 
+# Lists of ships in an answer: up to MAX_NAMES_IN_ANSWER are named; a longer list gets the
+# count and a few examples. The map page shows the full list under the answer; elsewhere the
+# answer offers it (a follow-up needs a chat that keeps the conversation, not there yet).
+MAX_NAMES_IN_ANSWER = 10
+MORE_ON_MAP = "say that the full list is shown below the answer"
+MORE_ELSEWHERE = "offer to list them all"
+
 PHRASE_PROMPT = """\
 Answer the user's question in one or two plain sentences, as a person would, from the data
-below. Do not mention SQL, queries, results, tables, columns or rows - just state the answer,
+below, as plain text without Markdown. Do not mention SQL, queries, results, tables, columns,
+rows, entries or how the data was found - just state the answer,
 e.g. "63 ships were docked in Skagen at 08:00 on 3 March 2026." Use the numbers exactly as
 given (you may round decimals to two places), say what they count in everyday words (ships,
 not reports; "different ships" only where it matters), and add nothing that is not in the data.
+If the data lists ships, always give how many there are (the row count, or a total column
+if there is one) and refer to ships by name where the data has one. Up to {max_names} ships:
+name them all. More: give the count, name a few as examples, and {more}.
 
 Question: {question}
 SQL: {sql}
 Columns: {columns}
-Rows: {rows}"""
+Rows (at most the first 100): {rows}
+Number of rows: {row_count}"""
 
 
 # --- questions about times outside the data -----------------------------------------------
@@ -815,7 +873,7 @@ def run_routed(question: str, max_turns: int = 10, enable_thinking: bool = False
     choice, reason = route(planner, question)
     if choice == "reply" and clearly_data(question):
         choice, reason = "plan", f"not reply: a question about ship data ({reason})"
-    trace = _run_route(planner, question, choice, reason, max_turns, enable_thinking)
+    trace = _run_route(planner, question, choice, reason, max_turns, enable_thinking, map_view)
     if note:
         trace["answer"] = f"{trace['answer']}\n\n{note}"
     if question != asked:
@@ -824,7 +882,7 @@ def run_routed(question: str, max_turns: int = 10, enable_thinking: bool = False
 
 
 def _run_route(planner: OpenAI, question: str, choice: str, reason: str, max_turns: int,
-               enable_thinking: bool) -> dict:
+               enable_thinking: bool, map_view: bool = False) -> dict:
     if choice == "reply":
         response = planner.chat.completions.create(
             model=MODEL_PATH,
@@ -847,8 +905,11 @@ def _run_route(planner: OpenAI, question: str, choice: str, reason: str, max_tur
             response = planner.chat.completions.create(
                 model=MODEL_PATH,
                 messages=[{"role": "user", "content": PHRASE_PROMPT.format(
+                    max_names=MAX_NAMES_IN_ANSWER,
+                    more=(MORE_ON_MAP if map_view else MORE_ELSEWHERE),
                     question=question, sql=step["sql"], columns=result["columns"],
-                    rows=json.dumps(result["rows"][:MAX_ROWS_FOR_PLANNER], default=str))}],
+                    rows=json.dumps(result["rows"][:MAX_ROWS_FOR_PLANNER], default=str),
+                    row_count=result.get("total_rows", len(result["rows"])))}],
                 temperature=0,
                 max_tokens=300,
                 extra_body={"chat_template_kwargs": {"enable_thinking": False}},
