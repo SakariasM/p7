@@ -731,6 +731,11 @@ _VISUAL_RE = re.compile(r"\b(heat ?maps?|maps?|charts?|plots?|graphs?|draw|visua
 VISUAL_REPLY = ("Visualisation (maps, heatmaps, charts or drawn routes) is not supported yet. I "
                 "can give the numbers behind it instead, e.g. how many ships left a port on each "
                 "day, or their departure times.")
+# Asked from the map page (map_view=True), map and route requests are drawn there instead.
+_MAP_REQUEST_RE = re.compile(r"\b(heat ?maps?|maps?|charts?|plots?|graphs?|draw|show|"
+                             r"visuali[sz]\w*|routes?|tracks?)\b", re.IGNORECASE)
+MAP_REPLY = ("Shown on the map where it can be: ships at a moment, or one vessel's route over "
+             "at most 31 days. Heatmaps and charts are not supported yet.")
 
 
 def clearly_data(question: str) -> bool:
@@ -777,7 +782,7 @@ def route(planner: OpenAI, question: str) -> tuple[str, str]:
 
 
 def run_routed(question: str, max_turns: int = 10, enable_thinking: bool = False,
-               return_trace: bool = False):
+               return_trace: bool = False, map_view: bool = False):
     """Simple questions go straight to the student (one query, answer worded by the 8B); the
     rest, and direct attempts that fail or return no rows, go through the planner. The
     comparison of 2026-10-14 showed the student alone is best and 4x faster on single-step
@@ -788,10 +793,14 @@ def run_routed(question: str, max_turns: int = 10, enable_thinking: bool = False
     question, relative_note = resolve_relative(question)
     question = bridges_named(question)
     period_reply, note = period_problem(question)
-    if not period_reply and _VISUAL_RE.search(question):
-        period_reply = VISUAL_REPLY
+    visual = _VISUAL_RE.search(question) or (
+        map_view and re.search(r"\b(routes?|tracks?)\b", question, re.IGNORECASE)
+        and _MAP_REQUEST_RE.search(question))
+    if not period_reply and visual:
+        period_reply = MAP_REPLY if map_view else VISUAL_REPLY
     if period_reply:
-        reason = ("visualisation" if period_reply == VISUAL_REPLY else "outside the data period")
+        reason = ("visualisation" if period_reply in (VISUAL_REPLY, MAP_REPLY)
+                  else "outside the data period")
         trace = {"answer": period_reply, "plan": None, "tool_calls": [], "place_calls": [],
                  "route": "reply", "route_reason": reason,
                  "question_as_read": question}

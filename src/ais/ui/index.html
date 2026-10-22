@@ -28,8 +28,8 @@
   h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
   .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
   label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-  input, select, button { font: inherit; }
-  input, select {
+  input, select, button, textarea { font: inherit; }
+  input, select, textarea {
     width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px;
     background: var(--panel); color: var(--text);
   }
@@ -64,6 +64,9 @@
   .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
   .ramp { width: 46px; height: 6px; border-radius: 3px; display: inline-block;
     background: linear-gradient(90deg, hsl(200 80% 55%), hsl(280 70% 50%), hsl(345 85% 45%)); }
+  textarea { resize: vertical; }
+  .answer { white-space: pre-wrap; border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px 10px; margin-top: 8px; background: var(--bg); }
   .leaflet-popup-content { font: 13px/1.45 system-ui, sans-serif; }
   .leaflet-popup-content button { margin-top: 6px; padding: 4px 10px; }
   @media (max-width: 760px) {
@@ -79,6 +82,23 @@
     <h1>AIS Explorer</h1>
     <div class="sub">P7 prototype · Danish waters, Oct 2025 – Sep 2026 · all times UTC</div>
   </div>
+
+  <section>
+    <h2>Ask about the data</h2>
+    <textarea id="ask-q" rows="3" placeholder="Ask in plain language, e.g. How many tankers passed under the Great Belt Bridge in January 2026?"></textarea>
+    <p class="hint" id="ask-examples">
+      Try <button class="link">Which ships were docked in Skagen at 08:00 on 3 March 2026?</button>,
+      <button class="link">Show the route of TYCHO BRAHE from 1 to 3 March 2026</button> or
+      <button class="link">Were there more ships in Aarhus or Esbjerg on 12 May 2026?</button>
+    </p>
+    <div class="row" style="margin-top:8px">
+      <button id="ask-btn">Ask</button>
+      <button id="ask-clear" class="ghost" style="flex:0 0 70px">Clear</button>
+    </div>
+    <div id="ask-status" class="status"></div>
+    <div id="ask-answer" class="answer" hidden></div>
+    <ul id="ask-vessels" class="list" style="margin-top:8px"></ul>
+  </section>
 
   <section>
     <h2>Ships at a moment</h2>
@@ -229,8 +249,10 @@ async function loadSnapshot() {
     const s = await api("/snapshot", params);
     shipsLayer.clearLayers();
     for (const it of s.items) {
+      const hl = highlight.has(it.mmsi);  // ships an answer is about
       L.circleMarker([it.lat, it.lon], {
-        radius: filtered ? 6 : 4, weight: 1, color: "#ffffff", fillColor: colorFor(it.ship_type), fillOpacity: .9,
+        radius: hl ? 8 : filtered ? 6 : 4, weight: hl ? 3 : 1, color: hl ? "#1d1d1b" : "#ffffff",
+        fillColor: colorFor(it.ship_type), fillOpacity: .9,
       }).bindPopup(() => `
         <b>${esc(it.name || "Unknown name")}</b><br>
         ${esc(it.ship_type || "Unknown type")} · MMSI ${it.mmsi}<br>
@@ -472,6 +494,88 @@ $("route-btn").onclick = async () => {
   } finally {
     $("route-btn").disabled = false;
   }
+};
+
+// Ask: questions go through /ask to the agent harness (harness/api.py). The answer's map
+// hints (harness/map_hints.py) say what it is about; the map then zooms to the places, sets
+// the time and filters, highlights the vessels, or opens a vessel's route.
+let highlight = new Set();
+const ROUTES = { direct: "answered by the SQL specialist", plan: "answered by the planner",
+  "direct->plan": "answered by the planner (after a direct try)", reply: "no query needed" };
+const day = 86400e3;
+
+async function showOnMap(h) {
+  highlight = new Set((h.vessels || []).map(v => v.mmsi));
+  if (h.places && h.places.length) {
+    const b = L.latLngBounds([]);
+    for (const p of h.places) { b.extend([p.box[1], p.box[0]]); b.extend([p.box[3], p.box[2]]); }
+    map.fitBounds(b, { padding: [30, 30], maxZoom: 12 });
+  }
+  const when = h.at || h.start;
+  if (when) $("at").value = when.slice(0, 16);
+  $("name").value = h.name_filter || "";
+  $("type").value = SHIP_TYPES.includes(h.ship_type) ? h.ship_type : "";
+  showClear();
+  $("ask-vessels").innerHTML = (h.vessels || []).slice(0, 50).map(v => `
+    <li data-mmsi="${v.mmsi}"><b>${esc(v.name || "MMSI " + v.mmsi)}</b><div class="meta">${v.mmsi}</div></li>`).join("");
+  if (h.action === "route" && h.start && h.end) {
+    let mmsi = h.vessels && h.vessels.length === 1 ? h.vessels[0].mmsi : null;
+    if (!mmsi && h.vessel_query) {
+      const vs = await api("/vessels", { q: h.vessel_query, limit: 1 });
+      mmsi = vs.length ? vs[0].mmsi : null;
+    }
+    if (mmsi) {
+      await selectVessel(mmsi);
+      $("route-from").value = h.start.slice(0, 10);
+      $("route-to").value = iso(new Date(new Date(h.end + "Z") - day)).slice(0, 10);
+      $("route-btn").click();
+      return;
+    }
+  }
+  if (h.action) await loadSnapshot();
+}
+
+async function ask() {
+  const question = $("ask-q").value.trim();
+  if (!question) return;
+  $("ask-btn").disabled = true;
+  $("ask-answer").hidden = true;
+  $("ask-vessels").innerHTML = "";
+  setStatus("ask-status", "Thinking… simple questions take about 10 s, harder ones up to a minute");
+  const t0 = performance.now();
+  try {
+    const r = await fetch("/ask", { method: "POST", headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ question }) });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.detail || r.statusText);
+    $("ask-answer").textContent = body.answer;
+    $("ask-answer").hidden = false;
+    const secs = ((performance.now() - t0) / 1000).toFixed(0);
+    setStatus("ask-status", `${ROUTES[body.route] || "answered"} · ${secs} s`);
+    await showOnMap(body.map || {});
+  } catch (e) {
+    setStatus("ask-status", e.message, true);
+  } finally {
+    $("ask-btn").disabled = false;
+  }
+}
+$("ask-btn").onclick = ask;
+$("ask-q").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(); } });
+$("ask-examples").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (b) { $("ask-q").value = b.textContent; ask(); }
+});
+$("ask-vessels").addEventListener("click", e => {
+  const li = e.target.closest("li");
+  if (li) selectVessel(Number(li.dataset.mmsi));
+});
+$("ask-clear").onclick = () => {
+  highlight = new Set();
+  $("ask-q").value = "";
+  $("ask-answer").hidden = true;
+  $("ask-vessels").innerHTML = "";
+  setStatus("ask-status", "");
+  loadSnapshot();
 };
 
 loadSnapshot();
