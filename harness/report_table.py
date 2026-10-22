@@ -21,10 +21,11 @@ from eval_sql import CANNOT_RE, CLARIFY_RE, EVAL_DIR, answer_has_reference
 
 LOGS = PROJECT_DIR / "logs" / "eval"
 SETS = {"eval": "answers.json", "places": "places_answers.json",
-        "multi": "multistep_answers.json", "group": "group_answers.json"}
+        "multi": "multistep_answers.json", "list": "list_answers.json",
+        "group": "group_answers.json"}
 # The group set is shown as two columns: its data questions, and the ones to decline or
 # clarify (a one-query SQL setup cannot decline, so those count as wrong for it).
-COLUMNS = ["eval", "places", "multi", "group data", "group decline"]
+COLUMNS = ["eval", "places", "multi", "list", "group data", "group decline"]
 # setup -> {set: [result files]}; a file per run
 SETUPS = {
     "Qwen3-8B, bare (question only)": {s: [f"baseline_qwen3-8b_bare_{s}.jsonl"] for s in SETS},
@@ -34,12 +35,16 @@ SETUPS = {
     "sql-v3 alone": {"eval": ["v3_eval_single.jsonl"], "places": ["v3_places_single.jsonl"]},
     "sql-v4 alone": {s: [f"v4_{s}_single.jsonl"] for s in SETS},
     "sql-v5 alone": {s: [f"v5_{s}_single.jsonl"] for s in SETS},
+    "sql-v6 alone": {s: [f"v6_{s}_single.jsonl"] for s in SETS},
     "Harness, router + sql-v4": {s: [f"r4_{k}_{s}.jsonl" for k in (1, 2, 3)]
                                  for s in ("eval", "places", "multi")}
                                 | {"group": ["group_r_3.jsonl", "group_r_4.jsonl"]},
     "Harness, router + sql-v5": {s: [f"r10_{k}_{s}.jsonl" for k in (1, 2)]
                                  for s in ("eval", "places", "multi")}
                                 | {"group": ["group_r_5.jsonl", "group_r_6.jsonl"]},
+    "Harness, router + sql-v6": {s: [f"r11_{k}_{s}.jsonl" for k in (1, 2)]
+                                 for s in ("eval", "places", "multi", "list")}
+                                | {"group": ["group_r_7.jsonl", "group_r_8.jsonl"]},
 }
 
 
@@ -68,7 +73,7 @@ def main() -> None:
         answers.update(json.loads((EVAL_DIR / f).read_text()))
     meta = questions_by_id()
     decline_ids = [q for q, m in meta.items() if m.get("expect") in ("reply", "clarify")]
-    print(f"{'setup':34}" + "".join(f"{c:>20}" for c in COLUMNS))
+    print(f"{'setup':34}" + "".join(f"{c:>18}" for c in COLUMNS))
     for setup, files in SETUPS.items():
         cells = []
         for column in COLUMNS:
@@ -92,7 +97,7 @@ def main() -> None:
                     n += sum(q not in seen for q in decline_ids)
             per_run = n // len(runs)
             cells.append(f"{ok / len(runs):.1f}/{per_run} ({100 * ok / max(n, 1):.0f}%)")
-        print(f"{setup:34}" + "".join(f"{c:>20}" for c in cells))
+        print(f"{setup:34}" + "".join(f"{c:>18}" for c in cells))
     sys.stdout.flush()
 
 
