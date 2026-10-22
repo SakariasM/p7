@@ -1115,6 +1115,210 @@ V5_TEMPLATES = [
     vd_farthest, harbored_at_time, harbored_compare_at_time,
 ]
 
+
+# --- sql-v6 templates -------------------------------------------------------------------
+# "Which ships ..." as lists (sql-v5 answered them with one ship or a sum): mmsi and name,
+# ordered by name, at a moment, in a window, on a day or over a period, docked or passing a
+# bridge; union over ports with count(DISTINCT mmsi) in more wordings; "any ships in harbour
+# at <time>" as a count at that moment; docked on a day (any time that day). The answer
+# wording (count, names, "full list below") is the harness's job, not the SQL's.
+LIST_MUST = r"which|what|list|name|show|tell me"
+
+
+def _which(noun: str, r: random.Random) -> str:
+    return r.choice([f"Which {noun}", f"What {noun}", f"List the {noun} that", f"Name the {noun} that"])
+
+
+def list_place_moment(s: Sampler) -> Instance:
+    r = s.rng
+    d, hhmm = s.day(), _odd_time(r)
+    p = s.place(big=r.random() < 0.7)  # small harbours are often empty at a given minute
+    t = s.ship_type() if r.random() < 0.4 else None
+    noun, tm = what(t)
+    pt, pm = place_text(p)
+    q = f"{_which(noun, r)} were in {pt} at {hhmm} UTC on {d_text(d, r)}?"
+    sql = (f"SELECT mmsi, arg_max(name, ts) AS name FROM vessel_positions\n"
+           f"WHERE date = {d_sql(d)} AND {box_sql(p)}{type_clause(t)}\n"
+           f"  AND ts > {ts_sql(d, hhmm)} - INTERVAL 10 MINUTE AND ts <= {ts_sql(d, hhmm)}\n"
+           f"GROUP BY mmsi ORDER BY name, mmsi")
+    return Instance("list_place_moment", q, sql, [d_must(d), pm, hhmm_must(hhmm), LIST_MUST, *tm])
+
+
+def list_place_window(s: Sampler) -> Instance:
+    r = s.rng
+    d, h = s.day(), s.hour(0, 21)
+    k = r.randint(1, 2)
+    t0, t1 = f"{h:02d}:00", f"{h + k:02d}:00"
+    p = s.place(big=r.random() < 0.6)
+    t = s.ship_type() if r.random() < 0.5 else None
+    noun, tm = what(t)
+    pt, pm = place_text(p)
+    q = f"{_which(noun, r)} were in {pt} between {t0} and {t1} UTC on {d_text(d, r)}?"
+    sql = (f"SELECT mmsi, arg_max(name, ts) AS name FROM vessel_positions\n"
+           f"WHERE date = {d_sql(d)} AND ts >= {ts_sql(d, t0)} AND ts < {ts_sql(d, t1)}\n"
+           f"  AND {box_sql(p)}{type_clause(t)}\nGROUP BY mmsi ORDER BY name, mmsi")
+    return Instance("list_place_window", q, sql,
+                    [d_must(d), hhmm_must(t0), hhmm_must(t1), pm, LIST_MUST, *tm])
+
+
+def list_place_day(s: Sampler) -> Instance:
+    r = s.rng
+    d = s.day()
+    p = s.place(big=r.random() < 0.5)
+    t = s.ship_type() if r.random() < 0.6 else None
+    noun, tm = what(t)
+    pt, pm = place_text(p)
+    q = r.choice([f"{_which(noun, r)} were seen in {pt} on {d_text(d, r)}?",
+                  f"{_which(noun, r)} visited {pt} on {d_text(d, r)}?"])
+    sql = (f"SELECT mmsi, name FROM vessel_days\n"
+           f"WHERE date = {d_sql(d)} AND list_contains(places, {sql_str(p)}){vd_type(t)}\n"
+           f"ORDER BY name, mmsi")
+    return Instance("list_place_day", q, sql, [d_must(d), pm, LIST_MUST, *tm])
+
+
+def list_place_period(s: Sampler) -> Instance:
+    r = s.rng
+    d0, d1, when, dm = long_period(s)
+    p = s.place(big=False)
+    t = s.ship_type() if r.random() < 0.7 else None
+    noun, tm = what(t)
+    pt, pm = place_text(p)
+    q = r.choice([f"{_which(noun, r)} visited {pt} {when}?",
+                  f"{_which(noun, r)} were seen in {pt} {when}?"])
+    sql = (f"SELECT mmsi, arg_max(name, date) AS name FROM vessel_days\n"
+           f"WHERE {vd_where(d0, d1)} AND list_contains(places, {sql_str(p)}){vd_type(t)}\n"
+           f"GROUP BY mmsi ORDER BY name, mmsi")
+    return Instance("list_place_period", q, sql, [*dm, pm, LIST_MUST, *tm])
+
+
+def list_docked_moment(s: Sampler) -> Instance:
+    r = s.rng
+    d, p, hhmm = s.day(), r.choice(PORTS), _odd_time(r)
+    t = s.ship_type() if r.random() < 0.3 else None
+    noun, tm = what(t)
+    pt, pm = place_text(p)
+    q = r.choice([f"{_which(noun, r)} were docked in {pt} at {hhmm} UTC on {d_text(d, r)}?",
+                  f"{_which(noun, r)} lay in port at {pt} at {hhmm} on {d_text(d, r)}?"])
+    sql = (f"SELECT mmsi, name FROM (\n"
+           f"  SELECT mmsi, arg_max(sog, ts) AS sog, arg_max(name, ts) AS name FROM vessel_positions\n"
+           f"  WHERE date = {d_sql(d)} AND {box_sql(p)}{type_clause(t)}\n"
+           f"    AND ts > {ts_sql(d, hhmm)} - INTERVAL 10 MINUTE AND ts <= {ts_sql(d, hhmm)}\n"
+           f"  GROUP BY mmsi\n) WHERE sog < 0.5 ORDER BY name, mmsi")
+    return Instance("list_docked_moment", q, sql,
+                    [d_must(d), pm, hhmm_must(hhmm), HARBOR_MUST, LIST_MUST, *tm])
+
+
+def list_docked_period(s: Sampler) -> Instance:
+    r = s.rng
+    if r.random() < 0.5:
+        d0 = d1 = s.day()
+        when, dm = f"on {d_text(d0, r)}", [d_must(d0)]
+    else:
+        d0, d1, when, dm = long_period(s)
+    p = r.choice(PORTS)
+    t = s.ship_type() if r.random() < 0.5 else None
+    noun, tm = what(t)
+    pt, pm = place_text(p)
+    q = f"{_which(noun, r)} docked in {pt} {when}?"
+    sql = (f"SELECT mmsi, arg_max(name, date) AS name FROM vessel_days\n"
+           f"WHERE {vd_where(d0, d1)} AND list_contains(still_in, {sql_str(p)}){vd_type(t)}\n"
+           f"GROUP BY mmsi ORDER BY name, mmsi")
+    return Instance("list_docked_period", q, sql, [*dm, pm, HARBOR_MUST, LIST_MUST, *tm])
+
+
+def list_bridge_period(s: Sampler) -> Instance:
+    r = s.rng
+    if r.random() < 0.5:
+        d0 = d1 = s.day()
+        when, dm = f"on {d_text(d0, r)}", [d_must(d0)]
+    else:
+        d0, d1, when, dm = long_period(s)
+    p = r.choice(BRIDGES)
+    t = s.ship_type() if r.random() < 0.8 else None
+    noun, tm = what(t)
+    pt, pm = place_text(p)
+    q = f"{_which(noun, r)} passed under {pt} {when}?"
+    sql = (f"SELECT mmsi, arg_max(name, date) AS name FROM vessel_days\n"
+           f"WHERE {vd_where(d0, d1)} AND list_contains(moving_in, {sql_str(p)}){vd_type(t)}\n"
+           f"GROUP BY mmsi ORDER BY name, mmsi")
+    return Instance("list_bridge_period", q, sql, [*dm, pm, PASS_MUST, LIST_MUST, *tm])
+
+
+def list_long_ships(s: Sampler) -> Instance:
+    r = s.rng
+    d0, d1, when, dm = long_period(s)
+    p = s.place()
+    length = r.randrange(200, 360, 20)
+    q = f"{r.choice(['Which', 'What'])} ships longer than {length} m were seen in {place_text(p)[0]} {when}?"
+    sql = (f"SELECT mmsi, arg_max(name, date) AS name, max(length) AS length FROM vessel_days\n"
+           f"WHERE {vd_where(d0, d1)} AND list_contains(places, {sql_str(p)}) AND length > {length}\n"
+           f"GROUP BY mmsi ORDER BY name, mmsi")
+    return Instance("list_long_ships", q, sql,
+                    [*dm, place_text(p)[1], num_must(length), LIST_MUST, r"longer|over|more than|above"])
+
+
+def union_places_v6(s: Sampler) -> Instance:
+    r = s.rng
+    chosen = r.sample(PORTS, r.choice([2, 3]))
+    d0, d1 = period(s)
+    when, dm = period_text(d0, d1, r)
+    names = [place_text(p)[0] for p in chosen]
+    listed = ", ".join(names[:-1]) + " or " + names[-1]
+    q = r.choice([
+        "How many different vessels were in any of {l2} {when}, each vessel counted once?",
+        "How many vessels were in {l} {when}, without counting a vessel twice?",
+        "In total, how many distinct ships were in {l} {when}?",
+        "How many unique vessels visited {l} {when}?",
+    ]).format(l=listed, l2=", ".join(names[:-1]) + " and " + names[-1], when=when)
+    boxes = "\n    OR ".join(f"({box_sql(p)})" for p in chosen)
+    sql = (f"SELECT count(DISTINCT mmsi) AS vessels FROM vessel_positions\n"
+           f"WHERE {date_where(d0, d1)}\n  AND ({boxes})")
+    return Instance("union_places_v6", q, sql, [*dm, *(place_text(p)[1] for p in chosen)])
+
+
+def harbored_any_at_time(s: Sampler) -> Instance:
+    r = s.rng
+    d, p, hhmm = s.day(), r.choice(PORTS), _odd_time(r)
+    pt, pm = place_text(p)
+    q = r.choice(["Were any ships in harbour at {p} at {t} on {d}?",
+                  "Was any vessel docked in {p} on {d} at {t} UTC?",
+                  "Did any boats lie in port at {p} at {t} on {d}?"]).format(
+        p=pt, d=d_text(d, r), t=hhmm)
+    return Instance("harbored_any_at_time", q, harbored_at_part(p, d, hhmm),
+                    [d_must(d), pm, hhmm_must(hhmm), HARBOR_MUST])
+
+
+def docked_day(s: Sampler) -> Instance:
+    r = s.rng
+    d = s.day()
+    if r.random() < 0.5:
+        p = r.choice(PORTS)
+        pt, pm = place_text(p)
+        q = r.choice(["How many ships were docked in {p} on {d}?",
+                      "How many vessels lay in port at {p} on {d}?"]).format(p=pt, d=d_text(d, r))
+        sql = (f"SELECT count(*) AS vessels FROM vessel_days\n"
+               f"WHERE date = {d_sql(d)} AND list_contains(still_in, {sql_str(p)})")
+        return Instance("docked_day", q, sql, [d_must(d), pm, HARBOR_MUST])
+    p1 = r.choice(PORTS)
+    p2 = r.choice(NEAR_PORTS[p1])
+    (a, am), (b, bm) = place_text(p1), place_text(p2)
+    q = r.choice(["Were more ships docked in {a} or in {b} on {d}?",
+                  "On {d}, did {a} or {b} have more vessels in port?"]).format(a=a, b=b, d=d_text(d, r))
+    part = ("SELECT count(*) AS n FROM vessel_days WHERE date = {d} AND "
+            "list_contains(still_in, {p})")
+    sql = (f"WITH a AS ({part.format(d=d_sql(d), p=sql_str(p1))}),\n"
+           f"     b AS ({part.format(d=d_sql(d), p=sql_str(p2))})\n"
+           f"SELECT CASE WHEN a.n > b.n THEN {sql_str(p1)} WHEN b.n > a.n THEN {sql_str(p2)} "
+           f"END AS more_in,\n       a.n AS {sql_ident(p1)}, b.n AS {sql_ident(p2)} FROM a, b")
+    return Instance("docked_day", q, sql, [d_must(d), am, bm, HARBOR_MUST])
+
+
+V6_TEMPLATES = [
+    list_place_moment, list_place_window, list_place_day, list_place_period, list_docked_moment,
+    list_docked_period, list_bridge_period, list_long_ships, union_places_v6,
+    harbored_any_at_time, docked_day,
+]
+
 TEMPLATES = [
     vessels_on_day, vessels_type_day, vessels_window, vessels_place_window,
     vessels_place_type_range, vessels_every_day, daily_counts, hourly_counts_place,
@@ -1123,4 +1327,4 @@ TEMPLATES = [
     vessel_destination, vessel_static, vessel_distance, underway_type_at_time,
     status_at_time_place, status_share, near_vessel, closest_pair_place, long_ships,
     top_destinations, duplicate_share, non_vessel_rows,
-] + COMPOSITE_TEMPLATES + V5_TEMPLATES
+] + COMPOSITE_TEMPLATES + V5_TEMPLATES + V6_TEMPLATES
