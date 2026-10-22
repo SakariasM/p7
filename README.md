@@ -196,7 +196,7 @@ not the copies in this repo. Copy changes over deliberately. Example crontab (`c
 
 Pause: `rm ~/.llm_auto` (cron) or `touch serving/STOP` (jobs), then
 `scancel --name=llm-serve --name=llm-student`. Start the student by hand with
-`sbatch slurm/serve_student.slurm [MODEL_DIR]` (default `models/qwen2.5-coder-1.5b-sql-v5`).
+`sbatch slurm/serve_student.slurm [MODEL_DIR]` (default `models/qwen2.5-coder-1.5b-sql-v6`).
 
 ### Running the agent and the API
 
