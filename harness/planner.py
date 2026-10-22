@@ -109,14 +109,16 @@ How to work:
 5. Check each result against its request and SQL. If it is an error, empty or implausible,
    rephrase the request more simply or split it, at most twice per step. Sending the same
    request again gives the same result.
-6. Answer concisely with the numbers, dates and places, describing each number by what the
-   SQL actually computed (e.g. distinct vessels, not reports). Say if a step failed or data
-   was missing. Never invent numbers. No ship is longer than about 400 m: longer lengths are
+6. Answer concisely in plain language with the numbers, dates and places, describing each
+   number by what was actually counted (ships, not reports). Do not mention SQL, queries,
+   requests, tools, the assistant or result tables in the answer, and do not list MMSI
+   numbers unless the user asks for them. Say if a step failed or data was missing. Never invent numbers. No ship is longer than about 400 m: longer lengths are
    AIS errors, so for the largest or longest ship ask again for vessels at most 400 m long,
    and mention that longer values were left out as errors.
-7. If you counted cruise ships, say clearly in the answer that you assumed passenger ships
-   of 250 m or longer are cruise ships, and that AIS has no cruise category, so the number
-   cannot be certain (large ferries may be included, small cruise ships missed)."""
+7. If you counted cruise ships, give the answer first, then say clearly in one or two
+   sentences of your own that you counted passenger ships of 250 m or longer as cruise ships
+   because AIS has no cruise category, so the number cannot be certain (large ferries may be
+   included, small cruise ships missed)."""
 
 ASK_DATA_SCHEMA = {
     "type": "function",
@@ -257,7 +259,8 @@ def with_cruise_note(question: str, answer: str, steps: list[dict]) -> str:
     used = any(_CRUISE_SQL_RE.search(st["sql"]) or
                ("port_calls" in st["request"] and '"Passenger"' in st["request"])
                for st in steps)
-    if ("cruise" in question.lower() or used) and "assum" not in answer.lower():
+    stated = "assum" in answer.lower() or re.search(r"\b250\s*(?:m\b|met)", answer)
+    if ("cruise" in question.lower() or used) and not stated:
         return f"{answer}\n\n{CRUISE_NOTE}"
     return answer
 
@@ -562,9 +565,11 @@ e.g. <EXAMPLE>.
 Question: {question}"""
 
 PHRASE_PROMPT = """\
-Answer the user's question in one or two sentences from the SQL result below. Use the numbers
-exactly as given (you may round decimals to two places), say what they count (e.g. distinct
-vessels), and do not add anything that is not in the result.
+Answer the user's question in one or two plain sentences, as a person would, from the data
+below. Do not mention SQL, queries, results, tables, columns or rows - just state the answer,
+e.g. "63 ships were docked in Skagen at 08:00 on 3 March 2026." Use the numbers exactly as
+given (you may round decimals to two places), say what they count in everyday words (ships,
+not reports; "different ships" only where it matters), and add nothing that is not in the data.
 
 Question: {question}
 SQL: {sql}
