@@ -100,6 +100,59 @@ def typed_select(src: str) -> str:
     """
 
 
+def processed_select(src: str) -> str:
+    """The same columns as typed_select, over one day of the project's processed Parquet
+    (data/processed/ais/date=YYYY-MM-DD/ais.parquet on AI-LAB).
+
+    Floats go through VARCHAR so FLOAT columns get the CSV's decimal values back: a direct
+    cast turns sog 102.2 into 102.19999694824219, which slips past the SOG sentinel check."""
+    src_sql = src.replace("'", "''")
+
+    def num(col: str) -> str:
+        return f"TRY_CAST({col}::VARCHAR AS DOUBLE)"
+
+    return f"""
+    SELECT
+      ts,
+      clean_text(mobile_type)                      AS mobile_type,
+      mmsi::BIGINT                                 AS mmsi,
+      {num("lat")}                                 AS lat,
+      {num("lon")}                                 AS lon,
+      clean_text(nav_status)                       AS nav_status,
+      {num("rot")}                                 AS rot,
+      {num("sog")}                                 AS sog,
+      {num("cog")}                                 AS cog,
+      heading::SMALLINT                            AS heading,
+      imo::BIGINT                                  AS imo,
+      clean_text(callsign)                         AS callsign,
+      clean_text(name)                             AS name,
+      clean_text(ship_type)                        AS ship_type,
+      clean_text(cargo_type)                       AS cargo_type,
+      {num("width")}                               AS width,
+      {num("length")}                              AS length,
+      clean_text(pos_fix_device)                   AS pos_fix_device,
+      {num("draught")}                             AS draught,
+      clean_text(destination)                      AS destination,
+      eta,
+      clean_text(data_source)                      AS data_source_type,
+      {num("dim_a")}                               AS a,
+      {num("dim_b")}                               AS b,
+      {num("dim_c")}                               AS c,
+      {num("dim_d")}                               AS d
+    FROM read_parquet('{src_sql}')
+    """
+
+
+@contextmanager
+def typed_source(path: Path) -> Generator[str]:
+    """Yield a typed SELECT over one day of raw data: a DMA .zip/.csv or a processed .parquet."""
+    if path.suffix == ".parquet":
+        yield processed_select(str(path))
+        return
+    with csv_source(path) as src:
+        yield typed_select(src)
+
+
 CLEAN_TEXT_MACRO = """
 CREATE OR REPLACE MACRO clean_text(s) AS
   CASE WHEN trim(s) IN ('', 'Unknown', 'Undefined', 'Unknown value') THEN NULL ELSE trim(s) END

@@ -71,6 +71,15 @@ def test_snapshot(client: TestClient) -> None:
     assert {i["mmsi"] for i in r.json()["items"]} == {219000001, 219000002}
 
 
+def test_snapshot_filters(client: TestClient) -> None:
+    base = {"bbox": BBOX, "at": "2026-09-24T00:05:00"}
+    r = client.get("/snapshot", params={**base, "name": "bravo"})
+    assert [i["mmsi"] for i in r.json()["items"]] == [219000002]
+    r = client.get("/snapshot", params={**base, "ship_type": "Cargo"})
+    assert [i["mmsi"] for i in r.json()["items"]] == [219000001]
+    assert client.get("/snapshot", params={**base, "name": ""}).status_code == 422
+
+
 @pytest.mark.parametrize(
     "params",
     [
@@ -110,9 +119,32 @@ def test_derived_endpoints(derived_client: TestClient) -> None:
     assert [s["point_count"] for s in stops["items"]] == [15]
 
 
+def test_route(derived_client: TestClient) -> None:
+    window = {"start": "2026-09-24T00:00:00", "end": "2026-09-25T00:00:00"}
+    r = derived_client.get("/vessels/219000011/route", params=window).json()
+    assert len(r["legs"]) == 2 and not r["truncated"]
+    assert r["legs"][0]["start_ts"] < r["legs"][1]["start_ts"]
+    assert r["legs"][0]["geometry"]["type"] == "LineString"
+    assert [s["point_count"] for s in r["stops"]] == [15]
+    long = {"start": "2026-08-01T00:00:00", "end": "2026-09-24T00:00:00"}
+    assert derived_client.get("/vessels/219000011/route", params=long).status_code == 400
+
+
+def test_route_503_until_derived(client: TestClient) -> None:
+    window = {"start": "2026-09-24T00:00:00", "end": "2026-09-25T00:00:00"}
+    assert client.get(f"/vessels/{A}/route", params=window).status_code == 503
+
+
 def test_openapi_contract_is_committed_and_current() -> None:
     import json
 
     committed = Path(__file__).parents[1] / "api" / "openapi.json"
     current = json.dumps(create_app(None).openapi(), indent=2, sort_keys=True) + "\n"
     assert committed.read_text() == current, "run `uv run ais openapi`"
+
+
+def test_ui_page_is_served_but_not_in_the_contract(client: TestClient) -> None:
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    assert "/" not in client.get("/openapi.json").json()["paths"]
