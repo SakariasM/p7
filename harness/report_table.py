@@ -45,6 +45,9 @@ SETUPS = {
     "Harness, router + sql-v6": {s: [f"r11_{k}_{s}.jsonl" for k in (1, 2)]
                                  for s in ("eval", "places", "multi", "list")}
                                 | {"group": ["group_r_7.jsonl", "group_r_8.jsonl"]},
+    # The same harness on the hosting machine (RTX 4080 SUPER 16 GB): planner Qwen3-8B-FP8.
+    "Harness, router + sql-v6, FP8 planner": {s: [f"host_fp8_{k}_{s}.jsonl" for k in (1, 2)]
+                                              for s in SETS},
 }
 
 
