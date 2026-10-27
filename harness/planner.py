@@ -103,7 +103,7 @@ How to work:
    country (e.g. "visited Denmark in August") call port_calls with the country instead of
    ask_data (cruise ships: ship_type Passenger, min_length_m 250); for the ports of an
    island or sea area (e.g. "docked at Bornholm") call port_calls with area. Leave out
-   ship_type for all ships.
+   ship_type for all ships. For a single port, and to list vessels by name, use ask_data.
 4. Do the arithmetic yourself: differences, ratios, percentages, totals across requests.
    An average per day is the average of the daily counts, never the number of distinct
    vessels over the period divided by the number of days (most vessels appear on many days).
@@ -791,6 +791,25 @@ _COUNT_WORDS_RE = re.compile(
     r"fastest|slowest|busiest)\b", re.IGNORECASE)
 _VISUAL_RE = re.compile(r"\b(heat ?maps?|maps?|charts?|plots?|graphs?|draw|visuali[sz]\w*)\b",
                         re.IGNORECASE)
+_LIST_WORDS_RE = re.compile(
+    r"^\s*(?:list|name)\b|\bwhich\s+(?:\w+\s+)?(?:vessels|ships|boats|ferries)\b", re.IGNORECASE)
+
+
+_DOCKED_RE = re.compile(r"\b(dock\w*|harbou?r\w*|moored|in port|called|visit\w*)\b",
+                        re.IGNORECASE)
+
+
+def plain_list(question: str) -> bool:
+    """Asks which vessels were at one known place on a date: the student's own list queries
+    (sql-v6), whatever the router thinks (the FP8 router sent "List the vessels that docked
+    in Svendborg on September 23" to plan, where the 8B counted port calls instead).
+    Docking in an area (e.g. Bornholm) means its ports: that stays with port_calls."""
+    if not (_LIST_WORDS_RE.search(question) and _DATE_WORDS_RE.search(question)):
+        return False
+    found = places.mentioned(question, places.load())
+    return len(found) == 1 and not (found[0].kind == "area" and _DOCKED_RE.search(question))
+
+
 VISUAL_REPLY = ("Visualisation (maps, heatmaps, charts or drawn routes) is not supported yet. I "
                 "can give the numbers behind it instead, e.g. how many ships left a port on each "
                 "day, or their departure times.")
@@ -873,6 +892,8 @@ def run_routed(question: str, max_turns: int = 10, enable_thinking: bool = False
     choice, reason = route(planner, question)
     if choice == "reply" and clearly_data(question):
         choice, reason = "plan", f"not reply: a question about ship data ({reason})"
+    elif choice == "plan" and plain_list(question):
+        choice, reason = "direct", f"not plan: a list at one place ({reason})"
     trace = _run_route(planner, question, choice, reason, max_turns, enable_thinking, map_view)
     if note:
         trace["answer"] = f"{trace['answer']}\n\n{note}"
