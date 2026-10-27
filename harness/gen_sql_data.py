@@ -54,6 +54,7 @@ from sql_templates import ALL_PLACES, EXCLUDED_DATE_RE, TEMPLATES, Sampler, d_te
 
 OUT_DIR = PROJECT_DIR / "data" / "text2sql"
 MAX_ANSWER_ROWS = 50
+MAX_LIST_ROWS = 1000  # list templates (sql-v6): as many rows as a query returns by default
 # Rewrites that read like SQL teach the student nothing about real questions.
 SQL_LEAK_RE = re.compile(
     r"vessel_positions|\bais\b table|ship_type|nav_status|haversine|DATE '|\bselect\b|"
@@ -156,9 +157,9 @@ def parse_list(text: str) -> list[str]:
     return [s.strip() for s in items if isinstance(s, str) and s.strip()]
 
 
-def usable(result: dict) -> bool:
+def usable(result: dict, max_rows: int = MAX_ANSWER_ROWS) -> bool:
     """Ran, has rows, not too many, and not only zeros and NULLs."""
-    if "error" in result or not result["rows"] or result["row_count"] > MAX_ANSWER_ROWS:
+    if "error" in result or not result["rows"] or result["row_count"] > max_rows:
         return False
     return any(v not in (None, 0, 0.0) for row in result["rows"] for v in row)
 
@@ -202,7 +203,8 @@ def cmd_templates(args) -> None:
 
     def work(inst):
         result = run_sql(inst.sql)
-        if not usable(result):
+        # "Which ships ..." lists may be long: up to the query row limit.
+        if not usable(result, MAX_LIST_ROWS if inst.family.startswith("list_") else MAX_ANSWER_ROWS):
             return inst, None, 0, []
         prompt = PARAPHRASE_PROMPT.format(question=inst.question, sql=inst.sql)
         reply = teacher.chat([{"role": "user", "content": prompt}], temperature=0.8)[0]
