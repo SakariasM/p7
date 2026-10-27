@@ -37,7 +37,8 @@ PORT_CALLS_SCHEMA = {
             "named area such as an island or sea area, in a period: the number of distinct "
             "vessels, the busiest ports and the MMSI list. Use it for questions like 'how many "
             "ships visited Denmark in August' (country) or 'how many ships docked at Bornholm' "
-            "(area). Give country or area, not both. Up to 3 months."),
+            "(area). Give country or area, not both. Up to 3 months. Not for a single port "
+            "or for listing vessels by name: use ask_data for those."),
         "parameters": {
             "type": "object",
             "properties": {
