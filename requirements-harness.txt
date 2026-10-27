@@ -1,7 +1,8 @@
 # Agent harness (harness/): its own venv, separate from ~/llm_venv.
 # Do not install these into the vLLM venv: vLLM 0.29.0 pins
 # fastapi[standard]>=0.133.0,<0.137.0 and newer versions break it.
-duckdb
+# 2.0 drops the profiling settings eval_sql.py times queries with.
+duckdb==1.5.6
 pandas
 openai
 fastapi
