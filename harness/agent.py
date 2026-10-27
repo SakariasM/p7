@@ -8,6 +8,7 @@ CLI usage:
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -17,7 +18,9 @@ from ais_tool import PROJECT_DIR, TOOL_SCHEMA, query_ais_data
 
 ENDPOINT_FILE = PROJECT_DIR / "serving" / "current_endpoint.txt"
 # vLLM serves the model under the path it was started with (see slurm/serve_llm.slurm).
-MODEL_PATH = str(PROJECT_DIR / "models" / "qwen3-8b")
+# The planner model as vLLM serves it (its path or --served-model-name). P7_PLANNER_MODEL
+# sets it on hosts that serve another build, e.g. Qwen3-8B-FP8 on a 16 GB GPU.
+MODEL_PATH = os.environ.get("P7_PLANNER_MODEL", str(PROJECT_DIR / "models" / "qwen3-8b"))
 
 SYSTEM_PROMPT = (
     "You are a data analyst assistant for Danish AIS vessel-trajectory data. "
