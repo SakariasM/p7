@@ -48,6 +48,9 @@ SETUPS = {
     # The same harness on the hosting machine (RTX 4080 SUPER 16 GB): planner Qwen3-8B-FP8.
     "Harness, router + sql-v6, FP8 planner": {s: [f"host_fp8_{k}_{s}.jsonl" for k in (1, 2)]
                                               for s in SETS},
+    # ... with list questions at one place routed to the student (commit 86b7760).
+    "Harness, router + sql-v6, FP8, list guard": {s: [f"host_fp8_{k}_{s}.jsonl" for k in (3, 4)]
+                                                  for s in SETS},
 }
 
 
