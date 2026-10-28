@@ -44,7 +44,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import places
-from ais_tool import PROJECT_DIR, query_ais_data
+from ais_tool import HAVE_VESSEL_DAYS, PROJECT_DIR, connect, query_ais_data
 from ask import FEEDBACK_FILE, LOG_DIR
 import planner
 from planner import (_MONTH_NAMES, DATA_FIRST, DATA_LAST, FIRST_DAY, LAST_DAY, TYPE_SYNONYMS,
@@ -71,12 +71,28 @@ _ORD = r"(?:st|nd|rd|th)?"
 _YEAR = r"(?:,?\s+(\d{4}))?"
 _DATE_RANGE_RE = re.compile(rf"\b(\d{{1,2}}){_ORD}(\s+(?:to|and|until|till|-|–)\s+)"
                             rf"(\d{{1,2}}){_ORD}\s+(?:of\s+)?{_M}{_YEAR}", re.IGNORECASE)
+# "December 30 to 1 January 2026": each date has its own month (and the year can turn).
+_CROSS_RANGE_RE = re.compile(rf"\b{_M}\s+(\d{{1,2}}){_ORD}(\s+(?:to|and|until|till|-|–)\s+)"
+                             rf"(\d{{1,2}}){_ORD}\s+(?:of\s+)?{_M}{_YEAR}", re.IGNORECASE)
 _MONTH_RANGE_RE = re.compile(rf"\b{_M}\s+(\d{{1,2}}){_ORD}(\s+(?:to|and|until|till|-|–)\s+)"
                              rf"(\d{{1,2}}){_ORD}\b(?!\s*:){_YEAR}", re.IGNORECASE)
 _ISO_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 _DAY_MONTH_RE = re.compile(rf"\b(\d{{1,2}}){_ORD}\s+(?:of\s+)?{_M}{_YEAR}", re.IGNORECASE)
 _MONTH_DAY_RE = re.compile(rf"\b{_M}\s+(\d{{1,2}}){_ORD}\b{_YEAR}", re.IGNORECASE)
 _TIME_RE = re.compile(r"\b(\d{1,2}):(\d{2})(?::\d{2})?\b")
+# Hours as plain numbers: "between 12 and 13", "from 6 to 8" (not "between 12 and 13 knots"),
+# "6 pm", "at 6 in the morning", "at 18 utc". They become time slots like "12:00".
+_NOT_HOURS = (r"(?!\s*(?:knots?|kn|m|meters?|metres?|km|nm|%|percent|ships?|vessels?|boats?|"
+              r"craft|hours?|minutes?|days?|times?|degrees?|tons?|tonnes?)\b)")
+_HOUR_RANGE_RE = re.compile(rf"\b(between|from)\s+(\d{{1,2}})\s+(and|to|until|till)\s+"
+                            rf"(\d{{1,2}})\b{_NOT_HOURS}", re.IGNORECASE)
+_HOUR_AMPM_RE = re.compile(r"\b(\d{1,2})\s*(am|pm|a\.m\.|p\.m\.)(?!\w)", re.IGNORECASE)
+_HOUR_DAYPART_RE = re.compile(r"\b(\d{1,2})\s+in\s+the\s+(morning|afternoon|evening)\b",
+                              re.IGNORECASE)
+_HOUR_UTC_RE = re.compile(r"\bat\s+(\d{1,2})\s*(utc|z)\b", re.IGNORECASE)
+# Limits with a unit: "longer than 270 m", "faster than 20 knots"; the number is the slot.
+_LIMIT_RE = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)(?=\s*(?:m|meters?|metres?|knots?|kn|km|nm|"
+                       r"nautical\s+miles?)\b)", re.IGNORECASE)
 _TOKEN_RE = re.compile(r"qq([a-z]+)(\d+)qq")
 _SLOT_RE = re.compile(r"\{([a-z]+\d+)(?:\.([a-z_]+))?\}")
 _QUOTED_RE = re.compile(r"'([^']*)'")
@@ -119,7 +135,9 @@ class _Slots:
 
 def question_skeleton(question: str) -> tuple[str, dict[str, object], dict[str, str]]:
     """(alias, values, words): the question as planner.run_routed hands it on (after its
-    rewrites and spell_out), normalised, with places, dates, times and ship types as slots."""
+    rewrites and spell_out), normalised, with places, dates, times (also plain hours), ship
+    types and limits with a unit as slots. Vessel names are found with the SQL (candidate)
+    or the pattern's wording (match), not here."""
     slots = _Slots()
     text = spell_out(question)
 
@@ -129,6 +147,19 @@ def question_skeleton(question: str) -> tuple[str, dict[str, object], dict[str, 
         if not (d1 and d2):
             return m.group(0)
         return slots.token("date", d1) + m.group(2) + slots.token("date", d2)
+
+    def cross_range(m: re.Match) -> str:
+        y2 = m.group(6)
+        d2 = _date(m.group(4), m.group(5), y2)
+        if y2 and d2:  # the first date's year: the same, or the one before at a year's turn
+            months = [n[:3].lower() for n in _MONTH_NAMES]
+            y1 = int(y2) - (months.index(m.group(1)[:3].lower()) > d2.month - 1)
+            d1 = _date(m.group(2), m.group(1), str(y1))
+        else:
+            d1 = _date(m.group(2), m.group(1), None)
+        if not (d1 and d2):
+            return m.group(0)
+        return slots.token("date", d1) + m.group(3) + slots.token("date", d2)
 
     def month_range(m: re.Match) -> str:
         d1 = _date(m.group(2), m.group(1), m.group(5))
@@ -151,6 +182,7 @@ def question_skeleton(question: str) -> tuple[str, dict[str, object], dict[str, 
         d = _date(m.group(2), m.group(1), m.group(3))
         return slots.token("date", d) if d else m.group(0)
 
+    text = _CROSS_RANGE_RE.sub(cross_range, text)
     text = _DATE_RANGE_RE.sub(date_range, text)
     text = _MONTH_RANGE_RE.sub(month_range, text)
     text = _ISO_RE.sub(iso, text)
@@ -158,6 +190,34 @@ def question_skeleton(question: str) -> tuple[str, dict[str, object], dict[str, 
     text = _MONTH_DAY_RE.sub(month_day, text)
     text = _TIME_RE.sub(lambda m: slots.token("time", f"{int(m.group(1)):02d}:{m.group(2)}"),
                         text)
+
+    def hour(h: int) -> str:
+        return slots.token("time", f"{h:02d}:00")
+
+    def hour_range(m: re.Match) -> str:
+        h1, h2 = int(m.group(2)), int(m.group(4))
+        if h1 > 23 or h2 > 24 or h2 == 24 and h1 == 0:
+            return m.group(0)
+        return f"{m.group(1)} {hour(h1)} {m.group(3)} {hour(h2 % 24)}"
+
+    def ampm(m: re.Match) -> str:
+        h = int(m.group(1))
+        if not 1 <= h <= 12:
+            return m.group(0)
+        return hour(h % 12 + (12 if m.group(2).lower().startswith("p") else 0))
+
+    def daypart(m: re.Match) -> str:
+        h = int(m.group(1))
+        if not 1 <= h <= 12:
+            return m.group(0)
+        return hour(h % 12 + (0 if m.group(2).lower() == "morning" else 12))
+
+    text = _HOUR_RANGE_RE.sub(hour_range, text)
+    text = _HOUR_AMPM_RE.sub(ampm, text)
+    text = _HOUR_DAYPART_RE.sub(daypart, text)
+    text = _HOUR_UTC_RE.sub(lambda m: f"at {hour(int(m.group(1)))} {m.group(2)}"
+                            if int(m.group(1)) <= 23 else m.group(0), text)
+    text = _LIMIT_RE.sub(lambda m: slots.token("num", m.group(1)), text)
     norm = f" {places.normalise(text)} "
 
     # Places: longest names first, each span once, numbered in order of appearance.
@@ -219,7 +279,29 @@ def _slot_in_sql(sql: str, name: str, value: object) -> str:
     if name.startswith("time"):
         return _in_literals(sql, lambda s: re.sub(rf"(?<![\d:]){value}(?=:\d\d\b|$)",
                                                   f"{{{name}}}", s))
+    if name.startswith("vessel"):  # a whole literal (or '%...%'), upper case or lower (ILIKE)
+        def vessel(s: str) -> str:
+            core = s.strip("%")
+            pre, post = s[:len(s) - len(s.lstrip("%"))], s[len(s.rstrip("%")):]
+            if core == str(value):
+                return f"{pre}{{{name}}}{post}"
+            if core == str(value).lower():
+                return f"{pre}{{{name}.lower}}{post}"
+            return s
+        return _in_literals(sql, vessel)
+    if name.startswith("num"):
+        return _NUMBER_OUTSIDE_RE.sub(lambda m: f"{{{name}}}" if m.group(1) and
+                                      float(m.group(1)) == float(value) else m.group(0), sql)
     return _in_literals(sql, lambda s: f"{{{name}}}" if s == value else s)  # ship type
+
+
+# A number outside quoted literals and slots (group 1); quoted literals are matched whole.
+_NUMBER_OUTSIDE_RE = re.compile(r"'[^']*'|(?<![\w.{])(\d+(?:\.\d+)?)(?![\w.}])")
+
+
+def _numbers_equal(sql: str, value: object) -> int:
+    return sum(1 for m in _NUMBER_OUTSIDE_RE.finditer(sql)
+               if m.group(1) and float(m.group(1)) == float(value))
 
 
 def sql_skeleton(sql: str, values: dict[str, object]) -> tuple[str | None, str]:
@@ -228,6 +310,8 @@ def sql_skeleton(sql: str, values: dict[str, object]) -> tuple[str | None, str]:
     for name, value in values.items():
         if name.startswith("place") and _place(str(value)) is None:
             return None, f"unknown place {value}"
+        if name.startswith("num") and _numbers_equal(sql, value) != 1:
+            return None, f"{name} not exactly once in the SQL"  # e.g. "1 km" as 1000, or twice
         out = _slot_in_sql(out, name, value)
     for name in values:
         if f"{{{name}" not in out:
@@ -271,6 +355,8 @@ def render_sql(skeleton: str, values: dict[str, object]) -> str:
     """The SQL for these slot values ({place1.lon_min} -> the place's box number, ...)."""
     def fill(m: re.Match) -> str:
         value = values[m.group(1)]
+        if m.group(2) == "lower":
+            return str(value).lower()
         if m.group(2):
             return places.coord(_place(str(value)).box[_BOX_KEYS.index(m.group(2))])
         return value.isoformat() if isinstance(value, date) else str(value)
@@ -292,6 +378,7 @@ def pattern_id(skeleton: str) -> str:
 _OTHER = {"port": ["Aalborg", "Skagen", "Frederikshavn"], "area": ["Kattegat", "Øresund",
                                                                    "Fehmarn Belt"],
           "type": ["Cargo", "Tanker", "Passenger"]}
+_OTHER_VESSELS = ["TYCHO BRAHE", "HAMLET", "AURORA AF HELSINGBORG", "PERNILLE", "JEPPE"]
 
 
 def other_values(values: dict[str, object]) -> dict[str, object]:
@@ -302,6 +389,10 @@ def other_values(values: dict[str, object]) -> dict[str, object]:
     for name, value in values.items():
         if name.startswith("date"):
             out[name] = min(value + shift, LAST_DAY)
+        elif name.startswith("vessel"):
+            out[name] = next(v for v in _OTHER_VESSELS if v not in used
+                             and places.normalise(v) in _vessel_names())
+            used.add(out[name])
         elif name.startswith(("place", "type")):
             place = _place(str(value)) if name.startswith("place") else None
             kind = "type" if name.startswith("type") else (place.kind if place else "port")
@@ -342,15 +433,24 @@ def answer_template(answer: str, question: str, values: dict[str, object],
     if any(m.group(0) not in _FIXED_WORDS and m.group(0).strip('"').lower()
            not in question.lower() for m in _NAME_RE.finditer(text)):
         return None
+    vessels = {str(v).lower() for k, v in values.items() if k.startswith("vessel")}
     for row in rows:
         for cell in row:
-            if isinstance(cell, str) and len(cell) > 2 and cell.lower() in text.lower():
+            if (isinstance(cell, str) and len(cell) > 2 and cell.lower() in text.lower()
+                    and cell.lower() not in vessels):
                 return None  # names or values from the rows: a list, not a template
     for name, value in values.items():
+        if name.startswith("num"):  # only with its unit, as in the question
+            text = re.sub(rf"(?<![\w.]){re.escape(str(value))}(?=\s*(?:m|meters?|metres?|"
+                          rf"knots?|kn|km|nm|nautical\s+miles?)\b)", f"{{{name}}}", text,
+                          flags=re.IGNORECASE)
+            continue
         if name.startswith("date"):
             forms = _date_forms(value)
         elif name.startswith("time"):
             forms = [value]
+        elif name.startswith("vessel"):
+            forms = [str(value)]
         elif name.startswith("place"):
             place = _place(str(value))
             forms = sorted({place.name, *place.aliases}, key=len, reverse=True)
@@ -359,6 +459,15 @@ def answer_template(answer: str, question: str, values: dict[str, object],
         for form in filter(None, forms):
             text = re.sub(rf"(?<!\w){re.escape(form)}(?!\w)", f"{{{name}}}", text,
                           flags=re.IGNORECASE)
+    hours = {v: k for k, v in values.items() if k.startswith("time")}
+
+    def hour_range(m: re.Match) -> str:  # "between 12 and 13" for the time slots 12:00, 13:00
+        a, b = f"{int(m.group(2)):02d}:00", f"{int(m.group(4)) % 24:02d}:00"
+        if a in hours and b in hours:
+            return f"{m.group(1)} {{{hours[a]}}} {m.group(3)} {{{hours[b]}}}"
+        return m.group(0)
+
+    text = _HOUR_RANGE_RE.sub(hour_range, text)
     cells = [(r, c, v) for r, row in enumerate(rows[:5]) for c, v in enumerate(row)
              if isinstance(v, (int, float)) and not isinstance(v, bool)]
 
@@ -389,6 +498,39 @@ def _jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.open() if line.strip()]
 
 
+_vessels: dict = {}
+
+
+def _vessel_names() -> dict[str, list[str]]:
+    """Normalised vessel name -> the names in the data (vessel_days), read once."""
+    if not _vessels and HAVE_VESSEL_DAYS:
+        names = connect().execute(
+            "SELECT DISTINCT name FROM vessel_days WHERE name IS NOT NULL").fetchall()
+        for (name,) in names:
+            key = places.normalise(name)
+            if len(key) >= 3:
+                _vessels.setdefault(key, []).append(name)
+    return _vessels
+
+
+def _vessel_slots(alias: str, values: dict, sql: str) -> str:
+    """Vessel names that the SQL compares with (in a quoted literal) and the question names,
+    as {vessel1}, ... in the alias; their values are added to values."""
+    names = _vessel_names()
+    for m in _QUOTED_RE.finditer(sql):
+        key = places.normalise(m.group(1).strip("%"))
+        if key not in names or f" {key} " not in f" {alias} ":
+            continue
+        name = next((n for n in names[key] if n.upper() == m.group(1).strip("%").upper()),
+                    names[key][0])
+        if name in values.values():
+            continue
+        slot = f"vessel{sum(k.startswith('vessel') for k in values) + 1}"
+        values[slot] = name
+        alias = f" {alias} ".replace(f" {key} ", f" {{{slot}}} ", 1).strip()
+    return alias
+
+
 def candidate(run: dict) -> tuple[dict | None, str]:
     """(pattern part from one logged run, "") or (None, why the run gives no pattern)."""
     if run.get("error") or not run.get("answer"):
@@ -401,6 +543,7 @@ def candidate(run: dict) -> tuple[dict | None, str]:
     question = run.get("question_as_read") or run["question"]
     alias, values, words = question_skeleton(question)
     sql = steps[0]["sql"]
+    alias = _vessel_slots(alias, values, sql)
     skeleton, why = sql_skeleton(sql, values)
     if skeleton is None:
         return None, why
@@ -610,18 +753,47 @@ def _approved_wordings(store: dict):
     return _loaded["vectors"]
 
 
+def _vessel_match(store: dict, alias: str,
+                  values: dict) -> tuple[list[dict], str, dict] | None:
+    """An approved wording with {vessel1}, ... that this question's wording fits, with each
+    vessel slot filled by exactly one vessel name in the data: ([pattern], wording, values)."""
+    names = _vessel_names()
+    for p in store["patterns"]:
+        if p["status"] != "approved":
+            continue
+        for a in p["aliases"]:
+            if "{vessel" not in a:
+                continue
+            rx = re.sub(r"\\\{(vessel\d+)\\\}", r"(?P<\1>.+?)", re.escape(a))
+            m = re.fullmatch(rx, alias)
+            if not m:
+                continue
+            found = {k: names.get(v, []) for k, v in m.groupdict().items()}
+            if all(len(n) == 1 for n in found.values()):
+                filled = {**values, **{k: n[0] for k, n in found.items()}}
+                if p["slots"] == sorted(filled):
+                    return [p], a, filled
+    return None
+
+
 def match(question: str, similar: bool = True) -> dict | None:
-    """The best approved pattern for this question: one with its exact wording and slots, or
-    (similar=True) the most similar approved wording that passes the guards, marked
-    "similar" for the 8B to confirm. Its SQL with this question's values, and the template of
-    the matched wording (None if it has none)."""
+    """The best approved pattern for this question: one with its exact wording and slots, one
+    whose wording it fits with a vessel name in a {vessel} slot, or (similar=True) the most
+    similar approved wording that passes the guards, marked "similar" for the 8B to confirm.
+    Its SQL with this question's values, and the template of the matched wording (None if it
+    has none)."""
     store = load()
     if not store:
         return None
     alias, values, words = question_skeleton(question)
     hits = [p for p in store["patterns"] if p["status"] == "approved"
             and alias in p["aliases"] and p["slots"] == sorted(values)]
-    matched, similarity = alias, 1.0
+    matched, similarity, via = alias, 1.0, "exact"
+    if not hits and "{vessel" in json.dumps(store["patterns"]):
+        found = _vessel_match(store, alias, values)
+        if found:
+            hits, matched, values = found
+            via = "vessel"
     if not hits and similar and _similar_key(alias) is not None:
         pairs, vectors = _approved_wordings(store)
         key = _similar_key(alias)
@@ -632,12 +804,12 @@ def match(question: str, similar: bool = True) -> dict | None:
             best = int(sims.argmax())
             if sims[best] >= SIMILAR_MIN:
                 matched, p = pairs[allowed[best]]
-                hits, similarity = [p], round(float(sims[best]), 3)
+                hits, similarity, via = [p], round(float(sims[best]), 3), "similar"
     if not hits:
         return None
     p = max(hits, key=lambda p: (p["score"], len(p["runs"])))
     return {"pattern": p["id"], "alias": alias, "matched": matched, "similarity": similarity,
-            "similar": matched != alias, "values": values, "words": words,
+            "similar": via == "similar", "values": values, "words": words,
             "sql": render_sql(p["sql"], values), "template": p["templates"].get(matched),
             "places": [str(v) for k, v in values.items() if k.startswith("place")]}
 
