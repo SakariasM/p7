@@ -1,13 +1,28 @@
 """HTTP API over an AisStore. All limits are enforced here, server-side."""
 
+import json
+import os
+import urllib.error
+import urllib.request
 from datetime import UTC, datetime, timedelta
+from pathlib import Path as FilePath
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import Body, Depends, FastAPI, HTTPException, Path, Query, Request
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 
-from ais.models import BBox, Snapshot, Stops, Track, Trip, TripGeometry, Vessel, VesselSummary
+from ais.models import (
+    BBox,
+    Route,
+    Snapshot,
+    Stops,
+    Track,
+    Trip,
+    TripGeometry,
+    Vessel,
+    VesselSummary,
+)
 from ais.store.base import AisStore, DerivedDataMissing
 
 MAX_SEARCH_RESULTS = 100
@@ -19,8 +34,14 @@ DEFAULT_LOOKBACK_MIN = 10
 MAX_SNAPSHOT_ITEMS = 5000
 MAX_TRIPS_WINDOW = timedelta(days=31)
 MAX_STOPS_ITEMS = 5000
+MAX_ROUTE_LEGS = 2000
 
 BBOX_DOC = "min_lon,min_lat,max_lon,max_lat (WGS84), e.g. 7.5,54.5,15.5,58"
+UI_PAGE = FilePath(__file__).parent / "ui" / "index.html"
+# The question box on the map forwards to the agent harness (harness/api.py, its own process
+# and Python environment). Not part of the API contract (api/openapi.json).
+HARNESS_URL = os.environ.get("HARNESS_URL", "http://127.0.0.1:8110")
+ASK_TIMEOUT_S = 300
 MMSI = Annotated[int, Path(ge=200_000_000, le=799_999_999)]
 MMSIQuery = Annotated[int, Query(ge=200_000_000, le=799_999_999)]
 
@@ -73,9 +94,34 @@ def create_app(store: AisStore | None) -> FastAPI:
     def _derived_missing(_: Request, e: DerivedDataMissing) -> JSONResponse:
         return JSONResponse({"detail": str(e)}, status_code=503)
 
+    @app.get("/", include_in_schema=False)
+    def ui() -> FileResponse:
+        """Prototype map page; it calls the endpoints below from the browser."""
+        return FileResponse(UI_PAGE)
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.post("/ask", include_in_schema=False)
+    def ask(body: Annotated[dict[str, object], Body()]) -> JSONResponse:
+        """Forward a question from the map page to the agent harness (with "map": true).
+        A plain def: FastAPI runs it in a worker thread, so a slow answer does not hold up
+        the map's other requests."""
+        payload = json.dumps({"question": str(body.get("question", "")), "map": True}).encode()
+        req = urllib.request.Request(
+            f"{HARNESS_URL}/ask", data=payload, headers={"Content-Type": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=ASK_TIMEOUT_S) as r:
+                return JSONResponse(json.loads(r.read()))
+        except urllib.error.HTTPError as e:
+            detail = json.loads(e.read() or b"{}").get("detail", e.reason)
+            return JSONResponse({"detail": f"harness: {detail}"}, status_code=502)
+        except (urllib.error.URLError, TimeoutError) as e:
+            return JSONResponse(
+                {"detail": f"harness not reachable at {HARNESS_URL}: {e}"}, status_code=503
+            )
 
     @app.get("/vessels", response_model=list[VesselSummary], tags=["vessels"])
     def search_vessels(
@@ -124,9 +170,25 @@ def create_app(store: AisStore | None) -> FastAPI:
             int,
             Query(ge=1, le=MAX_LOOKBACK_MIN, description="Include vessels seen this recently"),
         ] = DEFAULT_LOOKBACK_MIN,
+        name: Annotated[
+            str | None,
+            Query(
+                min_length=1,
+                max_length=100,
+                description="Only vessels whose name contains this, any case (e.g. MAERSK)",
+            ),
+        ] = None,
+        ship_type: Annotated[
+            str | None, Query(max_length=50, description="Only this ship type, e.g. Cargo")
+        ] = None,
     ) -> Snapshot:
         return s.snapshot(
-            bbox, to_utc_naive(at), timedelta(minutes=lookback_min), MAX_SNAPSHOT_ITEMS
+            bbox,
+            to_utc_naive(at),
+            timedelta(minutes=lookback_min),
+            MAX_SNAPSHOT_ITEMS,
+            name.strip() or None if name else None,
+            ship_type,
         )
 
     derived_503 = {503: {"description": "Trips/stops not built yet (`uv run ais derive`)"}}
@@ -154,6 +216,18 @@ def create_app(store: AisStore | None) -> FastAPI:
         if g is None:
             raise HTTPException(404, f"trip {trip_id} not found")
         return g
+
+    @app.get(
+        "/vessels/{mmsi}/route",
+        response_model=Route,
+        tags=["trajectories"],
+        responses={400: {"description": "Window invalid or longer than 31 days"}, **derived_503},
+    )
+    def route(s: StoreDep, mmsi: MMSI, start: datetime, end: datetime) -> Route:
+        """Where a vessel went: its trips as simplified lines, plus the stops between them.
+        Covers up to 31 days in one call, unlike the raw 24 h track."""
+        start, end = check_window(start, end, MAX_TRIPS_WINDOW)
+        return s.route(mmsi, start, end, MAX_ROUTE_LEGS)
 
     @app.get(
         "/stops",
