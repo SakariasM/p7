@@ -10,3 +10,5 @@ uvicorn[standard]
 tomli; python_version < "3.11"
 # Similar wordings in query_store.py (optional; without it only exact wordings match).
 fastembed
+# Graphs for the report (usage_plot.py; optional).
+matplotlib
