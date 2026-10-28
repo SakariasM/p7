@@ -15,10 +15,14 @@ the SQL and no date, box or place name is left in it; the SQL must come back unc
 original values and run with other values.
 
 Score (EvolveR's): s = (correct + 1) / (correct + wrong + 2), from the latest verdict per run.
-Status: approved at s >= 0.6 with at least one correct verdict (no LLM needed), disabled below
-0.3, otherwise pending; a manual review (approve, reject, disable) overrides that until newer
-verdicts bring the score below 0.3. A "wrong" verdict also gives a caution: the question's
-alias, the SQL that was wrong and the note, for the planner to be warned with.
+Status: approved at s >= 0.6 with at least one correct verdict, disabled below 0.3, otherwise
+pending; a manual review (approve, reject, disable) overrides that until newer verdicts bring
+the score below 0.3. A "wrong" verdict also gives a caution: the question's alias, the SQL that
+was wrong and the note, for the planner to be warned with.
+
+With P7_QUERY_STORE=1, planner.run_routed answers a question whose wording and slots match an
+approved pattern from the pattern's SQL: worded from the alias's template (no LLM call) or, for
+a wording without one (e.g. lists), by the 8B (one call instead of router, student and wording).
 
     python3 query_store.py distill               # rebuild data/query_store.json from the logs
     python3 query_store.py list [--status pending]
@@ -41,9 +45,10 @@ import places
 from ais_tool import PROJECT_DIR, query_ais_data
 from ask import FEEDBACK_FILE, LOG_DIR
 from planner import (_MONTH_NAMES, DATA_FIRST, DATA_LAST, FIRST_DAY, LAST_DAY, TYPE_SYNONYMS,
-                     spell_out)
+                     day_text, spell_out)
 
-STORE_FILE = PROJECT_DIR / "data" / "query_store.json"
+STORE_FILE = Path(os.environ.get("P7_QUERY_STORE_FILE",
+                                PROJECT_DIR / "data" / "query_store.json"))
 REVIEWS_FILE = PROJECT_DIR / "data" / "query_store_reviews.jsonl"
 APPROVE_SCORE = 0.6
 DISABLE_SCORE = 0.3
@@ -461,9 +466,87 @@ def _status(p: dict, review: dict | None) -> tuple[str, str]:
             review["action"]], "manual"
     if p["score"] < DISABLE_SCORE:
         return "disabled", "auto"
-    if p["correct"] and p["score"] >= APPROVE_SCORE and p["templates"]:
+    if p["correct"] and p["score"] >= APPROVE_SCORE:
         return "approved", "auto"
     return "pending", "auto"
+
+
+# --- answering from the store (planner.run_routed) ---------------------------------------
+
+_loaded: dict = {"mtime": None, "store": None}
+
+
+def load() -> dict | None:
+    """The store, read again when the nightly distill has rewritten it; None if there is none."""
+    try:
+        mtime = STORE_FILE.stat().st_mtime
+    except FileNotFoundError:
+        return None
+    if _loaded["mtime"] != mtime:
+        _loaded.update(mtime=mtime, store=json.loads(STORE_FILE.read_text()))
+    return _loaded["store"]
+
+
+def match(question: str) -> dict | None:
+    """The best approved pattern with this question's wording and slots: its SQL with this
+    question's values, and the template of this wording (None if it has none)."""
+    store = load()
+    if not store:
+        return None
+    alias, values, words = question_skeleton(question)
+    hits = [p for p in store["patterns"] if p["status"] == "approved"
+            and alias in p["aliases"] and p["slots"] == sorted(values)]
+    if not hits:
+        return None
+    p = max(hits, key=lambda p: (p["score"], len(p["runs"])))
+    return {"pattern": p["id"], "alias": alias, "values": values, "words": words,
+            "sql": render_sql(p["sql"], values), "template": p["templates"].get(alias),
+            "places": [str(v) for k, v in values.items() if k.startswith("place")]}
+
+
+def caution(question: str) -> dict | None:
+    """The caution for this question's wording, if answers to it were marked wrong."""
+    store = load()
+    if not store:
+        return None
+    alias = question_skeleton(question)[0]
+    return next((c for c in store["cautions"] if c["alias"] == alias), None)
+
+
+_FILL_RE = re.compile(r"\{(rows|cell:[\d:,]+|[a-z]+\d+)\}")
+
+
+def render_answer(hit: dict, result: dict) -> str | None:
+    """The wording's template filled in from the slots and the result; None if there is no
+    template, a cell is missing, or a count of 1 would need other grammar."""
+    rows = result.get("rows") or []
+
+    def fill(m: re.Match) -> str:
+        key = m.group(1)
+        if key == "rows":
+            return str(result.get("total_rows", len(rows)))
+        if key.startswith("cell:"):
+            _, r, c, decimals, *comma = key.split(":")
+            value = rows[int(r)][int(c)]
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise ValueError(f"cell {r}:{c} is not a number")
+            text = f"{value:{',' if comma else ''}.{decimals}f}"
+            if text == "1":
+                raise ValueError("a count of 1 needs other grammar")
+            return text
+        value = hit["values"][key]
+        if key.startswith("date"):
+            return day_text(value)
+        if key.startswith("type"):
+            return hit["words"].get(key, str(value).lower())
+        return str(value)
+
+    if not hit["template"]:
+        return None
+    try:
+        return _FILL_RE.sub(fill, hit["template"])
+    except (IndexError, KeyError, ValueError):
+        return None
 
 
 # --- review CLI --------------------------------------------------------------------------

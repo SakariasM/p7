@@ -871,6 +871,11 @@ def route(planner: OpenAI, question: str) -> tuple[str, str]:
     return (choice if choice in ("direct", "plan", "reply") else "plan"), str(decision.get("reason", text))
 
 
+# The learned-question store (query_store.py) answers the questions it has learned before the
+# router is asked; off unless P7_QUERY_STORE=1.
+USE_QUERY_STORE = os.environ.get("P7_QUERY_STORE", "0") == "1"
+
+
 def run_routed(question: str, max_turns: int = 10, enable_thinking: bool = False,
                return_trace: bool = False, map_view: bool = False):
     """Simple questions go straight to the student (one query, answer worded by the 8B); the
@@ -897,12 +902,17 @@ def run_routed(question: str, max_turns: int = 10, enable_thinking: bool = False
         return trace if return_trace else period_reply
     note = "\n".join(n for n in (relative_note, note) if n)
     planner = OpenAI(base_url=get_base_url(), api_key="not-needed")
-    choice, reason = route(planner, question)
-    if choice == "reply" and clearly_data(question):
-        choice, reason = "plan", f"not reply: a question about ship data ({reason})"
-    elif choice == "plan" and plain_list(question):
-        choice, reason = "direct", f"not plan: a list at one place ({reason})"
-    trace = _run_route(planner, question, choice, reason, max_turns, enable_thinking, map_view)
+    trace, warning = _run_learned(planner, question, map_view) if USE_QUERY_STORE else (None, None)
+    if trace is None:
+        choice, reason = route(planner, question)
+        if choice == "reply" and clearly_data(question):
+            choice, reason = "plan", f"not reply: a question about ship data ({reason})"
+        elif choice == "plan" and plain_list(question):
+            choice, reason = "direct", f"not plan: a list at one place ({reason})"
+        if warning:
+            choice, reason = "plan", f"answered wrong before ({reason})"
+        trace = _run_route(planner, question, choice, reason, max_turns, enable_thinking,
+                           map_view, warning)
     if note:
         trace["answer"] = f"{trace['answer']}\n\n{note}"
     if question != asked:
@@ -910,8 +920,52 @@ def run_routed(question: str, max_turns: int = 10, enable_thinking: bool = False
     return trace if return_trace else trace["answer"]
 
 
+def phrase(planner: OpenAI, question: str, step: dict, map_view: bool = False) -> str:
+    """The 8B's plain-text answer from one query's result (the direct route's wording)."""
+    result = step["result"]
+    response = planner.chat.completions.create(
+        model=MODEL_PATH,
+        messages=[{"role": "user", "content": PHRASE_PROMPT.format(
+            max_names=MAX_NAMES_IN_ANSWER,
+            more=(MORE_ON_MAP if map_view else MORE_ELSEWHERE),
+            question=question, sql=step["sql"], columns=result["columns"],
+            rows=json.dumps(result["rows"][:MAX_ROWS_FOR_PLANNER], default=str),
+            row_count=result.get("total_rows", len(result["rows"])))}],
+        temperature=0,
+        max_tokens=300,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+    )
+    return with_cruise_note(question, strip_thinking(response.choices[0].message.content), [step])
+
+
+def _run_learned(planner: OpenAI, question: str, map_view: bool) -> tuple[dict | None, str | None]:
+    """A question the learned-question store (query_store.py) knows: its pattern's SQL with this
+    question's values, worded from the pattern's template (no LLM call) or by the 8B (one call).
+    For a wording answered wrong before, a warning for the planner instead."""
+    import query_store  # here, not at the top: query_store imports this module
+
+    hit = query_store.match(question)
+    if hit:
+        result = with_total(hit["sql"], with_names(query_ais_data(hit["sql"])))
+        if "error" not in result and result.get("rows"):
+            step = {"request": question, "places": hit["places"], "sql": hit["sql"],
+                    "result": result}
+            answer = query_store.render_answer(hit, result)
+            trace = {"answer": answer or phrase(planner, question, step, map_view),
+                     "plan": None, "tool_calls": [step], "place_calls": [],
+                     "route": "learned" if answer else "learned+wording",
+                     "route_reason": f"pattern {hit['pattern']}"}
+            return trace, None
+    caution = query_store.caution(question)
+    if caution:
+        notes = "; ".join(caution["notes"][-3:]) or "no reason given"
+        return None, (f"Answers to a question worded like this were marked wrong before ({notes}). "
+                      f"Check each result against the question before answering.")
+    return None, None
+
+
 def _run_route(planner: OpenAI, question: str, choice: str, reason: str, max_turns: int,
-               enable_thinking: bool, map_view: bool = False) -> dict:
+               enable_thinking: bool, map_view: bool = False, warning: str | None = None) -> dict:
     if choice == "reply":
         response = planner.chat.completions.create(
             model=MODEL_PATH,
@@ -931,26 +985,14 @@ def _run_route(planner: OpenAI, question: str, choice: str, reason: str, max_tur
         step = ask_data(student, question)
         result = step["result"]
         if "error" not in result and result.get("rows"):
-            response = planner.chat.completions.create(
-                model=MODEL_PATH,
-                messages=[{"role": "user", "content": PHRASE_PROMPT.format(
-                    max_names=MAX_NAMES_IN_ANSWER,
-                    more=(MORE_ON_MAP if map_view else MORE_ELSEWHERE),
-                    question=question, sql=step["sql"], columns=result["columns"],
-                    rows=json.dumps(result["rows"][:MAX_ROWS_FOR_PLANNER], default=str),
-                    row_count=result.get("total_rows", len(result["rows"])))}],
-                temperature=0,
-                max_tokens=300,
-                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-            )
-            answer = with_cruise_note(question, strip_thinking(response.choices[0].message.content),
-                                      [step])
-            trace = {"answer": answer, "plan": None, "tool_calls": [step], "place_calls": [],
-                     "route": "direct", "route_reason": reason}
+            trace = {"answer": phrase(planner, question, step, map_view), "plan": None,
+                     "tool_calls": [step], "place_calls": [], "route": "direct",
+                     "route_reason": reason}
             return trace
         reason = f"direct attempt failed ({result.get('error', 'no rows')[:80]}); {reason}"
         choice = "fallback"
-    trace = run(question, max_turns=max_turns, enable_thinking=enable_thinking, return_trace=True)
+    asked = f"{question}\n\n{warning}" if warning else question
+    trace = run(asked, max_turns=max_turns, enable_thinking=enable_thinking, return_trace=True)
     if choice == "fallback":
         trace["tool_calls"] = [step] + trace["tool_calls"]
     trace.update(route="plan" if choice == "plan" else "direct->plan", route_reason=reason)
