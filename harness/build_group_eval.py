@@ -110,9 +110,11 @@ def questions() -> list[dict]:
         "average sog over all reports in Bornholm waters", ["average"])
     add(8, "What was the average size of boats in the area around Bornholm on April 18 2026?",
         "answer", f"SELECT round(avg(length), 1) AS avg_length_m FROM (SELECT mmsi, max(length) "
-                  f"AS length FROM vessel_positions WHERE date = DATE '2026-04-18' AND "
-                  f"{box('Bornholm waters')} AND length > 0 GROUP BY mmsi)",
-        "average length, each vessel once", ["average"])
+                  f"AS length FROM vessel_days WHERE date = DATE '2026-04-18' AND mmsi IN "
+                  f"(SELECT DISTINCT mmsi FROM vessel_positions WHERE date = DATE '2026-04-18' "
+                  f"AND {box('Bornholm waters')}) AND length BETWEEN 1 AND 400 GROUP BY mmsi)",
+        "average length, each vessel once, with the ship's own length (also when its reports "
+        "in the area had none); over 400 m is an AIS error", ["average"])
     add(9, "Are there any boats bigger than 500 meters in length that visited Aalborg during the "
            "month of July 2026?", "answer",
         f"SELECT count(DISTINCT mmsi) AS vessels FROM vessel_positions WHERE date BETWEEN "
@@ -177,11 +179,10 @@ SELECT count(DISTINCT seg.mmsi) AS vessels FROM seg JOIN r ON r.mmsi = seg.mmsi
         "Danish waters = the whole data; average over all days of distinct vessels per day",
         ["whole_data"])
     add(22, "What is the largest ship that sailed Danish waters in May?", "answer",
-        "SELECT name, length FROM vessel_positions WHERE date BETWEEN DATE '2026-05-01' AND "
-        "DATE '2026-05-31' AND length = (SELECT max(length) FROM vessel_positions WHERE date "
-        "BETWEEN DATE '2026-05-01' AND DATE '2026-05-31' AND length <= 450) GROUP BY ALL "
-        "ORDER BY name LIMIT 10",
-        "largest = longest plausible length (<= 450 m), May = May 2026", ["whole_data"])
+        "SELECT max(length) AS length_m FROM vessel_days WHERE date BETWEEN DATE '2026-05-01' "
+        "AND DATE '2026-05-31' AND length <= 400",
+        "largest = longest plausible length (<= 400 m; several ships share it, any of them is "
+        "right), May = May 2026", ["whole_data"])
     add(23, "Who has the most league of legends worlds trophies of all time.", "reply",
         definition="off-topic", tags=["decline"])
     add(24, "Which ship had the longest route in danish waters", "skip",

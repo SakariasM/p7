@@ -168,7 +168,7 @@
    "long_ships",
    "list"
   ],
-  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date BETWEEN DATE '2026-09-22' AND DATE '2026-09-24' AND lon BETWEEN 4.00 AND 8.50 AND lat BETWEEN 55.00 AND 57.50 AND length > 270 AND length <= 400 ORDER BY mmsi"
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date BETWEEN DATE '2026-09-22' AND DATE '2026-09-24' AND lon BETWEEN 4.00 AND 8.50 AND lat BETWEEN 55.00 AND 57.50 AND mmsi IN (SELECT mmsi FROM vessel_days WHERE date BETWEEN DATE '2026-09-22' AND DATE '2026-09-24' GROUP BY mmsi HAVING max(length) > 270 AND max(length) <= 400) ORDER BY mmsi"
  },
  {
   "id": "long_ships_02",
@@ -177,7 +177,7 @@
    "long_ships",
    "list"
   ],
-  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date BETWEEN DATE '2026-09-22' AND DATE '2026-09-24' AND lon BETWEEN 10.50 AND 12.50 AND lat BETWEEN 56.00 AND 57.60 AND length > 280 AND length <= 400 ORDER BY mmsi"
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date BETWEEN DATE '2026-09-22' AND DATE '2026-09-24' AND lon BETWEEN 10.50 AND 12.50 AND lat BETWEEN 56.00 AND 57.60 AND mmsi IN (SELECT mmsi FROM vessel_days WHERE date BETWEEN DATE '2026-09-22' AND DATE '2026-09-24' GROUP BY mmsi HAVING max(length) > 280 AND max(length) <= 400) ORDER BY mmsi"
  },
  {
   "id": "long_ships_03",
@@ -186,6 +186,6 @@
    "long_ships",
    "list"
   ],
-  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date BETWEEN DATE '2026-09-22' AND DATE '2026-09-24' AND lon BETWEEN 8.698 AND 8.751 AND lat BETWEEN 53.846 AND 53.88 AND length > 270 AND length <= 400 ORDER BY mmsi"
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date BETWEEN DATE '2026-09-22' AND DATE '2026-09-24' AND lon BETWEEN 8.698 AND 8.751 AND lat BETWEEN 53.846 AND 53.88 AND mmsi IN (SELECT mmsi FROM vessel_days WHERE date BETWEEN DATE '2026-09-22' AND DATE '2026-09-24' GROUP BY mmsi HAVING max(length) > 270 AND max(length) <= 400) ORDER BY mmsi"
  }
 ]

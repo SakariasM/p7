@@ -92,9 +92,12 @@ def long_ships(rng):
     p, length = rng.choice(t.BIG_PLACES), rng.randrange(250, 360, 10)
     q = (f"Which ships longer than {length} m were in {t.place_text(p)[0]} from 22 to 24 "
          f"September 2026?")
-    sql = (f"SELECT DISTINCT mmsi FROM vessel_positions WHERE date BETWEEN {t.d_sql(DAYS[0])} "
-           f"AND {t.d_sql(DAYS[-1])} AND {t.box_sql(p)} AND length > {length} "
-           f"AND length <= {t.MAX_REAL_LENGTH_M} ORDER BY mmsi")
+    # The ship's own length (its longest over the days): a position report can lack it, and
+    # GREENFIELD (272 m) was left out of Cuxhaven over one such report.
+    days = f"date BETWEEN {t.d_sql(DAYS[0])} AND {t.d_sql(DAYS[-1])}"
+    sql = (f"SELECT DISTINCT mmsi FROM vessel_positions WHERE {days} AND {t.box_sql(p)} "
+           f"AND mmsi IN (SELECT mmsi FROM vessel_days WHERE {days} GROUP BY mmsi "
+           f"HAVING max(length) > {length} AND max(length) <= {t.MAX_REAL_LENGTH_M}) ORDER BY mmsi")
     return q, sql
 
 

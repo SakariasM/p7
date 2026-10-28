@@ -16,12 +16,17 @@ Per vessel and day:
   still_in                            ... where it lay still (sog < 0.5): docked / harbored
   moving_in                           ... where it moved (sog >= 1): e.g. under a bridge
 
+--static then writes data/derived/vessel_static/vessel_static.parquet: each ship's usual
+(most common) name, ship_type, imo, length and width over all days. ais_tool's vessel_days
+view fills a day's empty fields from it (no static message from the ship that day).
+
 The place lists follow places.json at build time (PLACES_VERSION in _build.json); after
 places change, the lists only know the new places once the days are built again. Days
 whose file exists are skipped, so a failed run is started again; files are written to
 .partial and renamed when complete.
 
     python3 build_vessel_days.py [--task I --tasks N]   # day i where i % N == I (SLURM array)
+    python3 build_vessel_days.py --static               # after all days: the per-ship table
 """
 
 import argparse
@@ -32,7 +37,7 @@ import time
 import duckdb
 
 import places
-from ais_tool import _DATES, CLEAN_DIR, PROJECT_DIR
+from ais_tool import _DATES, CLEAN_DIR, PROJECT_DIR, VESSEL_STATIC_FILE
 
 OUT_DIR = PROJECT_DIR / "data" / "derived" / "vessel_days"
 MAX_LENGTH_M, MAX_WIDTH_M = 450, 80
@@ -113,6 +118,22 @@ def build_day(con: duckdb.DuckDBPyConnection, day: str) -> dict:
     return {"date": day, "vessels": rows}
 
 
+def build_static(con: duckdb.DuckDBPyConnection) -> dict:
+    """Each ship's most common name, type, IMO, length and width over all built days."""
+    partial = VESSEL_STATIC_FILE.with_suffix(".parquet.partial")
+    VESSEL_STATIC_FILE.parent.mkdir(parents=True, exist_ok=True)
+    con.execute(f"""
+        COPY (
+          SELECT mmsi, mode(name) AS name, mode(ship_type) AS ship_type, mode(imo) AS imo,
+                 mode(length) AS length, mode(width) AS width
+          FROM read_parquet('{OUT_DIR}/*/vessel_days.parquet') GROUP BY mmsi ORDER BY mmsi
+        ) TO '{partial}' (FORMAT parquet, COMPRESSION zstd)
+    """)
+    partial.rename(VESSEL_STATIC_FILE)
+    return {"vessels": con.execute(f"SELECT count(*) FROM read_parquet('{VESSEL_STATIC_FILE}')")
+            .fetchone()[0]}
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0].strip())
     p.add_argument("--task", type=int, default=0)
@@ -120,12 +141,16 @@ def main() -> None:
     p.add_argument("--threads", type=int, default=8)
     p.add_argument("--memory", default="24GB", help="DuckDB memory limit")
     p.add_argument("--spill", default="/tmp/duckdb_spill", help="DuckDB spill directory")
+    p.add_argument("--static", action="store_true", help="only the per-ship table")
     args = p.parse_args()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect()
     con.execute(f"SET threads = {args.threads}; SET enable_progress_bar = false; "
                 f"SET memory_limit = '{args.memory}'; SET temp_directory = '{args.spill}'; "
                 "SET preserve_insertion_order = false")
+    if args.static:
+        print(json.dumps(build_static(con)), flush=True)
+        return
     con.execute(HAVERSINE)
     version = places_table(con)
     build_file = OUT_DIR / "_build.json"

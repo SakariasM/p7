@@ -90,8 +90,8 @@
    "average"
   ],
   "expect": "answer",
-  "sql": "SELECT round(avg(length), 1) AS avg_length_m FROM (SELECT mmsi, max(length) AS length FROM vessel_positions WHERE date = DATE '2026-04-18' AND lon BETWEEN 14.50 AND 15.40 AND lat BETWEEN 54.85 AND 55.45 AND length > 0 GROUP BY mmsi)",
-  "definition": "average length, each vessel once"
+  "sql": "SELECT round(avg(length), 1) AS avg_length_m FROM (SELECT mmsi, max(length) AS length FROM vessel_days WHERE date = DATE '2026-04-18' AND mmsi IN (SELECT DISTINCT mmsi FROM vessel_positions WHERE date = DATE '2026-04-18' AND lon BETWEEN 14.50 AND 15.40 AND lat BETWEEN 54.85 AND 55.45) AND length BETWEEN 1 AND 400 GROUP BY mmsi)",
+  "definition": "average length, each vessel once, with the ship's own length (also when its reports in the area had none); over 400 m is an AIS error"
  },
  {
   "id": "group_09",
@@ -253,8 +253,8 @@
    "whole_data"
   ],
   "expect": "answer",
-  "sql": "SELECT name, length FROM vessel_positions WHERE date BETWEEN DATE '2026-05-01' AND DATE '2026-05-31' AND length = (SELECT max(length) FROM vessel_positions WHERE date BETWEEN DATE '2026-05-01' AND DATE '2026-05-31' AND length <= 450) GROUP BY ALL ORDER BY name LIMIT 10",
-  "definition": "largest = longest plausible length (<= 450 m), May = May 2026"
+  "sql": "SELECT max(length) AS length_m FROM vessel_days WHERE date BETWEEN DATE '2026-05-01' AND DATE '2026-05-31' AND length <= 400",
+  "definition": "largest = longest plausible length (<= 400 m; several ships share it, any of them is right), May = May 2026"
  },
  {
   "id": "group_23",

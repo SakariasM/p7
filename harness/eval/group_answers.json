@@ -59,7 +59,7 @@
   ],
   "rows": [
    [
-    86.9
+    85.9
    ]
   ]
  },
@@ -153,48 +153,10 @@
  },
  "group_22": {
   "columns": [
-   "name",
-   "length"
+   "length_m"
   ],
   "rows": [
    [
-    "AL NEFUD",
-    400
-   ],
-   [
-    "AL ZUBARA",
-    400
-   ],
-   [
-    "BANGKOK EXPRESS",
-    400
-   ],
-   [
-    "CMA CGM CONCORDE",
-    400
-   ],
-   [
-    "CMA CGM JEAN MERMOZ",
-    400
-   ],
-   [
-    "CMA CGM SORBONNE",
-    400
-   ],
-   [
-    "CMA CGM VENDOME",
-    400
-   ],
-   [
-    "COSCO CAPRICORN",
-    400
-   ],
-   [
-    "COSCO PLANET",
-    400
-   ],
-   [
-    "COSCO SAGITTARIUS",
     400
    ]
   ]

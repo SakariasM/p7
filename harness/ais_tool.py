@@ -53,8 +53,22 @@ VESSEL_DAYS_GLOB = f"{VESSEL_DAYS_DIR}/*/vessel_days.parquet"
 _VD_DATES = {p.parent.name.removeprefix("date=")
              for p in VESSEL_DAYS_DIR.glob("date=*/vessel_days.parquet")}
 HAVE_VESSEL_DAYS = bool(_DATES) and set(_DATES) <= _VD_DATES
-_VESSEL_DAYS_VIEW = (f"CREATE VIEW vessel_days AS SELECT * FROM read_parquet("
-                     f"'{VESSEL_DAYS_GLOB}', hive_partitioning=1);" if HAVE_VESSEL_DAYS else "")
+# A ship's name, type, IMO, length and width come from AIS static messages, which a ship sends
+# rarely; on 14% of vessel-days none came, and the day had no length (HMM GDANSK, 400 m, was
+# in Cuxhaven on a day without one). Such empty fields take the ship's usual value over the
+# year (build_vessel_days.py --static); a day's own value stays.
+VESSEL_STATIC_FILE = PROJECT_DIR / "data" / "derived" / "vessel_static" / "vessel_static.parquet"
+_VESSEL_DAYS = f"read_parquet('{VESSEL_DAYS_GLOB}', hive_partitioning=1)"
+if HAVE_VESSEL_DAYS and VESSEL_STATIC_FILE.exists():
+    _VESSEL_DAYS_VIEW = (
+        "CREATE VIEW vessel_days AS SELECT d.* REPLACE (coalesce(d.name, s.name) AS name, "
+        "coalesce(d.ship_type, s.ship_type) AS ship_type, coalesce(d.imo, s.imo) AS imo, "
+        "coalesce(d.length, s.length) AS length, coalesce(d.width, s.width) AS width) "
+        f"FROM {_VESSEL_DAYS} d LEFT JOIN read_parquet('{VESSEL_STATIC_FILE}') s USING (mmsi);")
+elif HAVE_VESSEL_DAYS:
+    _VESSEL_DAYS_VIEW = f"CREATE VIEW vessel_days AS SELECT * FROM {_VESSEL_DAYS};"
+else:
+    _VESSEL_DAYS_VIEW = ""
 
 # The SQL student's prompt (schema_context.md). The vessel_days part (schema_vessel_days.md)
 # goes in only for a student trained on it: sql-v5 on (the served student since 2026-10-21).
