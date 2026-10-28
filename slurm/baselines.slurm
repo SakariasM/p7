@@ -14,11 +14,13 @@
 #   bare  the question alone: no schema, no data, no tools, no planner; a text answer
 #   run   zero-shot SQL: the same schema prompt as the student (only the places a question
 #         names), one query, run with the usual guardrails; no training, planner or router
-# Results: logs/eval/baseline_<TAG>_<bare|run>_<eval|places|multi|group>.jsonl.
+# Results: logs/eval/baseline_<TAG>_<bare|run>_<eval|places|multi|list|group>.jsonl.
+# BASELINE_SETS="list" runs only those sets.
 #
 # Usage, from the repo root:
 #     sbatch slurm/baselines.slurm /ceph/project/P7-Agent-Harness/models/qwen2.5-coder-1.5b-instruct coder1.5b
 #     sbatch --gres=gpu:0 slurm/baselines.slurm 8b qwen3-8b   # the running llm-serve (Qwen3-8B)
+#     BASELINE_SETS=list sbatch slurm/baselines.slurm MODEL_DIR TAG
 
 set -euo pipefail
 trap 'echo "FAILED at line $LINENO (exit code $?)"' ERR
@@ -65,8 +67,9 @@ cd "$REPO_DIR/harness"
 declare -A SETS=([eval]="eval/questions.toml eval/answers.json"
                  [places]="eval/places_questions.json eval/places_answers.json"
                  [multi]="eval/multistep_questions.json eval/multistep_answers.json"
+                 [list]="eval/list_questions.json eval/list_answers.json"
                  [group]="eval/group_questions.json eval/group_answers.json")
-for set in eval places multi group; do
+for set in ${BASELINE_SETS:-eval places multi list group}; do
     read -r questions answers <<< "${SETS[$set]}"
     for cmd in bare run; do
         echo; echo "=== $TAG $cmd $set ==="
