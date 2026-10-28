@@ -1251,7 +1251,8 @@ def list_long_ships(s: Sampler) -> Instance:
     length = r.randrange(200, 360, 20)
     q = f"{r.choice(['Which', 'What'])} ships longer than {length} m were seen in {place_text(p)[0]} {when}?"
     sql = (f"SELECT mmsi, arg_max(name, date) AS name, max(length) AS length FROM vessel_days\n"
-           f"WHERE {vd_where(d0, d1)} AND list_contains(places, {sql_str(p)}) AND length > {length}\n"
+           f"WHERE {vd_where(d0, d1)} AND list_contains(places, {sql_str(p)}) AND length > {length}"
+           f" AND length <= {MAX_REAL_LENGTH_M}\n"
            f"GROUP BY mmsi ORDER BY name, mmsi")
     return Instance("list_long_ships", q, sql,
                     [*dm, place_text(p)[1], num_must(length), LIST_MUST, r"longer|over|more than|above"])

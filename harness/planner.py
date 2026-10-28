@@ -322,6 +322,7 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
     does not have, it runs through query_ais_data."""
     request = spell_out(request)
     named = places.mentioned(request, places.load() + (session or []))
+    request = own_place_names(request, named)
     response = student.chat.completions.create(
         model=model,
         messages=[{"role": "system", "content": places.with_places(SCHEMA_CONTEXT, named)},
@@ -330,7 +331,7 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
         max_tokens=1024 if model == MODEL_PATH else 512,
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
-    sql = extract_sql(response.choices[0].message.content)
+    sql = cap_lengths(extract_sql(response.choices[0].message.content))
     stray = places.unexplained_boxes(sql, named, request)
     bad = invalid_values(sql)
     if bad:
@@ -349,6 +350,32 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
     else:
         result = with_total(sql, with_names(query_ais_data(sql)))
     return {"request": request, "places": [p.name for p in named], "sql": sql, "result": result}
+
+
+def own_place_names(request: str, named: list[places.Place]) -> str:
+    """Other names of a place as the place's own name, the one the student's place list shows:
+    given "the Sound" it made up a box near Skagen instead of using Øresund's."""
+    for place in named:
+        for alias in sorted(place.aliases, key=len, reverse=True):
+            if alias != place.name:
+                request = re.sub(rf"(?<!\w){re.escape(alias)}(?!\w)", place.name, request,
+                                 flags=re.IGNORECASE)
+    return request
+
+
+MAX_REAL_LENGTH_M = 400  # as sql_templates.py: longer AIS lengths are errors
+_LENGTH_FLOOR_RE = re.compile(
+    r"(?<![\w(.])((?:\w+\.)?)(length\s*>=?\s*\d+(?:\.\d+)?)(?![\d.])"
+    r"(?!\s+AND\s+(?:\w+\.)?length\s*<)",
+    re.IGNORECASE)
+
+
+def cap_lengths(sql: str) -> str:
+    """`length > N` without an upper bound also gets `length <= 400`: the schema says longer
+    lengths are AIS errors, but the student left the cap out ("ships longer than 280 m" listed
+    SANTANDER at 436 m)."""
+    return _LENGTH_FLOOR_RE.sub(
+        lambda m: f"{m.group(1)}{m.group(2)} AND {m.group(1)}length <= {MAX_REAL_LENGTH_M}", sql)
 
 
 def with_total(sql: str, result: dict) -> dict:
@@ -670,7 +697,8 @@ _RELATIVE_RE = re.compile(
     rf"(?:,?\s*\b(?:in|during|over|for|within|from)\s+the\s+)?\b("
     rf"right now|now|currently|current|at the moment|at present|today|tonight|this morning"
     rf"|yesterday|last night|this week|this month|(?:last|past) (?:week|month)"
-    rf"|(?:last|past) {_SMALL} (days|weeks|hours))\b(?!\s+of\b)", re.IGNORECASE)
+    rf"|(?:last|past) {_SMALL} (days|weeks|hours)|(?:last|past) (?:hour|day))\b(?!\s+of\b)",
+    re.IGNORECASE)
 
 
 def _relative_count(m: re.Match) -> int:
@@ -714,8 +742,9 @@ def resolve_relative(question: str) -> tuple[str, str | None]:
     rest = re.sub(r"\s+([?.!,])", r"\1", re.sub(r"\s{2,}", " ", rest))
     end = re.search(r"[?.!]*$", rest)
     rewritten = f"{rest[:end.start()].rstrip(', ')} {when}{end.group(0) or '?'}"
-    whole = (" (whole days)" if m.group(3) and m.group(3).lower() == "hours"
-             and _relative_count(m) % 24 else "")
+    whole = (" (whole days)" if (m.group(3) and m.group(3).lower() == "hours"
+                                  and _relative_count(m) % 24)
+             or m.group(1).lower().endswith("hour") else "")
     note = (f'Note: "{m.group(1)}" is read as {when.split(" ", 1)[1]}{whole}, the latest data '
             f"available (the data covers {PERIOD_TEXT}; there are no live positions).")
     return rewritten, note
