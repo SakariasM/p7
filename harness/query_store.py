@@ -23,6 +23,8 @@ was wrong and the note, for the planner to be warned with.
 With P7_QUERY_STORE=1, planner.run_routed answers a question whose wording and slots match an
 approved pattern from the pattern's SQL: worded from the alias's template (no LLM call) or, for
 a wording without one (e.g. lists), by the 8B (one call instead of router, student and wording).
+A wording the store has not seen can match a similar approved one (embedding model on the CPU,
+guards on slots, numbers and meaning) if the 8B confirms both ask the same (one short call).
 
     python3 query_store.py distill               # rebuild data/query_store.json from the logs
     python3 query_store.py list [--status pending]
@@ -236,7 +238,32 @@ def sql_skeleton(sql: str, values: dict[str, object]) -> tuple[str | None, str]:
     known = {p.name.lower() for p in places.load()}
     if any(m.group(1).lower() in known for m in _QUOTED_RE.finditer(out)):
         return None, "a place name in the SQL that is not in the question"
+    if _span_numbers(out, values):
+        return None, "a number in the SQL that depends on the dates or times"
     return out, ""
+
+
+def _span_numbers(skeleton: str, values: dict[str, object]) -> list[float]:
+    """Numbers in the SQL that equal a span of the slot values: the student writes
+    count(*) / 3.0 for "per day from 22 to 24 September", which would stay 3.0 for any other
+    range. Days in a date range, hours or minutes between two times; 1 only after a /."""
+    dates = sorted(v for k, v in values.items() if k.startswith("date"))
+    times = sorted(int(v[:2]) * 60 + int(v[3:]) for k, v in values.items()
+                   if k.startswith("time"))
+    spans = set()
+    if len(dates) > 1:
+        days = (dates[-1] - dates[0]).days
+        spans |= {days, days + 1, 24 * (days + 1)}
+    if len(times) > 1:
+        minutes = times[-1] - times[0]
+        spans |= {minutes, minutes / 60}
+    plain = _QUOTED_RE.sub("''", _SLOT_RE.sub(" ", skeleton))
+    found = []
+    for m in re.finditer(r"(/\s*)?(?<![\w.])(\d+(?:\.\d+)?)(?![\w.])", plain):
+        x = float(m.group(2))
+        if x in spans and (x >= 2 or m.group(1)):
+            found.append(x)
+    return found
 
 
 def render_sql(skeleton: str, values: dict[str, object]) -> str:
@@ -473,7 +500,83 @@ def _status(p: dict, review: dict | None) -> tuple[str, str]:
 
 # --- answering from the store (planner.run_routed) ---------------------------------------
 
-_loaded: dict = {"mtime": None, "store": None}
+_loaded: dict = {"mtime": None, "store": None, "vectors": None}
+
+# Similar wordings (phase 4): a wording the store has not seen is compared with the approved
+# wordings by a small embedding model (CPU, no LLM). Similarity alone matched 3-7% wrongly on
+# the teacher rewrites ("docked" ~ "moving" 0.95), so it only picks a candidate: the slots, the
+# literal numbers and the meaning key below must agree, the slot roles must be fixed by the
+# wording, and the 8B confirms that both ask the same (planner._run_learned), as in EvolveR.
+EMBED_MODEL = "BAAI/bge-small-en-v1.5"
+EMBED_DIR = PROJECT_DIR / "models" / "embed"
+SIMILAR_MIN = 0.85
+_CONCEPTS = {k: re.compile(v) for k, v in {
+    "count": r"\bhow many\b|\bnumber of\b|\bcount\b|\btotal\b",
+    "list": r"\bwhich\b|\blist\b|\bname\b|^what (ships|vessels|boats)\b|\bidentify\b|\bshow\b",
+    "average": r"\baverage\b|\bmean\b|\bper day\b|\btypical",
+    "most": r"\bmost\b|\bhighest\b|\blargest\b|\blongest\b|\bbiggest\b|\bbusiest\b|\bfastest\b"
+            r"|\bmax",
+    "least": r"\bleast\b|\blowest\b|\bsmallest\b|\bshortest\b|\bslowest\b|\bfewest\b|\bmin",
+    "percent": r"\bpercent|\bshare\b|\bproportion\b|\bfraction\b",
+    "hour": r"\bhour",
+    "change": r"\bchange|\bdifference\b|\bincrease|\bdecrease|\bcompare|\bmore\b|\bfewer\b"
+              r"|\bthan\b",
+    "both": r"\bboth\b|\bas well as\b|\band also\b",
+    "or": r"\bor\b|\beither\b|\bany of\b",
+    "docked": r"\bdock|\bharbou?r|\bin port\b|\bberth|\bport call|\bcalled at\b"
+              r"|\bstopp?ed\b|\bstationary\b|\bstill\b|\bnot moving\b",
+    "visit": r"\bvisit",  # present at a place (vessel_days.places), not docked (still_in)
+    "moving": r"\bmov(e|ing|ed)\b|\bunderway\b|\bunder way\b|\bsail(s|ed)?\b|\btransit"
+              r"|\bpass|\bcross|\btravers|\bin motion\b|\bunder\b|\bwent\b",
+    "anchor": r"\banchor",
+    "moored": r"\bmoor",
+    "speed": r"\bspeed|\bknots?\b|\bfast\b|\bslow\b",
+    "length": r"\blength|\blong(est)?\b|\bsize\b|\bbig(gest)?\b|\blarge(st)?\b"
+              r"|\bsmallest\b|\bshortest\b|\bmet(er|re)s?\b|\bm\b",
+    "draught": r"\bdraught|\bdraft",
+    "distance": r"\bdistance|\bfar\b|\btravel|\bkm\b|\bnautical\b|\bvoyage|\btrip"
+                r"|\bjourney",
+    "destination": r"\bdestination",
+    "reports": r"\breport|\bmessages?\b|\bposition\b",
+    "new": r"\bnew\b|\bfirst time\b|\bnot seen\b",
+    "neg": r"\bnot\b|\bno\b|\bwithout\b|\bexcept\b|\bnever\b",
+    "where": r"\bwhere\b",
+    "same": r"\bevery\b|\beach of\b|\ball (three|two|the) days\b",
+    # ship types that are not slots (they are verbs too) must agree as words
+    "sailing": r"\bsailing\b",
+    "towing": r"\btowing\b",
+}.items()}
+_RANGE_RE = re.compile(r"(from|between) \{date1\} (to|and) \{date2\}")
+
+
+def _similar_key(alias: str) -> tuple | None:
+    """What two wordings must share to be compared: slots, literal numbers and meaning; None
+    if the wording does not fix the slot roles (two places, or two dates not as a range)."""
+    slots = re.findall(r"\{([a-z]+)(\d+)\}", alias)
+    kinds: dict[str, int] = {}
+    for kind, _ in slots:
+        kinds[kind] = kinds.get(kind, 0) + 1
+    if any(n > 1 for kind, n in kinds.items() if kind != "date"):
+        return None
+    if kinds.get("date", 0) > 1 and not (kinds["date"] == 2 and _RANGE_RE.search(alias)):
+        return None
+    plain = _SLOT_RE.sub(" ", alias)
+    return (tuple(sorted(k + n for k, n in slots)),
+            tuple(sorted(re.findall(r"\b\d+(?:\.\d+)?\b", plain))),
+            frozenset(k for k, rx in _CONCEPTS.items() if rx.search(plain)))
+
+
+def _embed(texts: list[str]):
+    """Unit vectors for the texts, or None without fastembed (then only exact wordings match)."""
+    try:
+        import numpy as np
+        from fastembed import TextEmbedding
+    except ImportError:
+        return None
+    if "model" not in _loaded:
+        _loaded["model"] = TextEmbedding(EMBED_MODEL, cache_dir=str(EMBED_DIR))
+    vectors = np.array(list(_loaded["model"].embed(texts)))
+    return vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
 
 
 def load() -> dict | None:
@@ -483,24 +586,50 @@ def load() -> dict | None:
     except FileNotFoundError:
         return None
     if _loaded["mtime"] != mtime:
-        _loaded.update(mtime=mtime, store=json.loads(STORE_FILE.read_text()))
+        _loaded.update(mtime=mtime, store=json.loads(STORE_FILE.read_text()), vectors=None)
     return _loaded["store"]
 
 
-def match(question: str) -> dict | None:
-    """The best approved pattern with this question's wording and slots: its SQL with this
-    question's values, and the template of this wording (None if it has none)."""
+def _approved_wordings(store: dict):
+    """(wording, pattern) for the approved patterns' wordings that may be matched by
+    similarity, with their vectors (computed once per store)."""
+    if _loaded["vectors"] is None:
+        pairs = [(a, p) for p in store["patterns"] if p["status"] == "approved"
+                 for a in p["aliases"] if _similar_key(a) is not None]
+        vectors = _embed([a for a, _ in pairs]) if pairs else None
+        _loaded["vectors"] = (pairs, vectors)
+    return _loaded["vectors"]
+
+
+def match(question: str, similar: bool = True) -> dict | None:
+    """The best approved pattern for this question: one with its exact wording and slots, or
+    (similar=True) the most similar approved wording that passes the guards, marked
+    "similar" for the 8B to confirm. Its SQL with this question's values, and the template of
+    the matched wording (None if it has none)."""
     store = load()
     if not store:
         return None
     alias, values, words = question_skeleton(question)
     hits = [p for p in store["patterns"] if p["status"] == "approved"
             and alias in p["aliases"] and p["slots"] == sorted(values)]
+    matched, similarity = alias, 1.0
+    if not hits and similar and _similar_key(alias) is not None:
+        pairs, vectors = _approved_wordings(store)
+        key = _similar_key(alias)
+        allowed = [i for i, (a, _) in enumerate(pairs) if _similar_key(a) == key]
+        query = _embed([alias]) if allowed else None
+        if query is not None and vectors is not None:
+            sims = vectors[allowed] @ query[0]
+            best = int(sims.argmax())
+            if sims[best] >= SIMILAR_MIN:
+                matched, p = pairs[allowed[best]]
+                hits, similarity = [p], round(float(sims[best]), 3)
     if not hits:
         return None
     p = max(hits, key=lambda p: (p["score"], len(p["runs"])))
-    return {"pattern": p["id"], "alias": alias, "values": values, "words": words,
-            "sql": render_sql(p["sql"], values), "template": p["templates"].get(alias),
+    return {"pattern": p["id"], "alias": alias, "matched": matched, "similarity": similarity,
+            "similar": matched != alias, "values": values, "words": words,
+            "sql": render_sql(p["sql"], values), "template": p["templates"].get(matched),
             "places": [str(v) for k, v in values.items() if k.startswith("place")]}
 
 
