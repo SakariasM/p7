@@ -26,9 +26,11 @@ import threading
 import time
 from pathlib import Path
 
+import llm_usage
 from ais_tool import PROJECT_DIR
 
-LOG_DIR = PROJECT_DIR / "logs" / "questions"
+# P7_QUESTION_LOG_DIR: somewhere else for tests, so they do not teach the store.
+LOG_DIR = Path(os.environ.get("P7_QUESTION_LOG_DIR", PROJECT_DIR / "logs" / "questions"))
 FEEDBACK_FILE = LOG_DIR / "feedback.jsonl"
 SHOW_ROWS = 10
 LOG_ROWS = 20  # result rows kept per step in the log
@@ -42,9 +44,19 @@ def append(path: Path, record: dict) -> None:
         f.write(line)
 
 
+def _store_snapshot() -> dict | None:
+    """The learned-question store when a question is answered: on or off, how many patterns."""
+    try:
+        import query_store  # here: it loads the planner
+        return query_store.snapshot()
+    except Exception:  # a log line must not fail over the store
+        return None
+
+
 def log_run(question: str, trace: dict, mode: str, seconds: float, source: str,
-            thinking: bool = False, user: str | None = None) -> str:
-    """Append one answered (or failed) question to today's log; returns its run id."""
+            thinking: bool = False, user: str | None = None, llm: dict | None = None) -> str:
+    """Append one answered (or failed) question to today's log, with its LLM calls (llm_usage
+    summary) and the store's size; returns its run id."""
     run_id = time.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(3)
     append(LOG_DIR / f"{time.strftime('%Y-%m-%d')}.jsonl", {
         "id": run_id, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "source": source,
@@ -52,7 +64,8 @@ def log_run(question: str, trace: dict, mode: str, seconds: float, source: str,
         "route_reason": trace.get("route_reason"), "thinking": thinking,
         "question": question, "question_as_read": trace.get("question_as_read"),
         "plan": trace.get("plan"), "answer": trace.get("answer"), "error": trace.get("error"),
-        "seconds": seconds, "place_calls": trace.get("place_calls", []),
+        "seconds": seconds, "llm": llm, "store": _store_snapshot(),
+        "place_calls": trace.get("place_calls", []),
         "steps": [{"request": s.get("request"), "places": s.get("places"), "sql": s.get("sql"),
                    "error": s["result"].get("error"), "columns": s["result"].get("columns"),
                    "row_count": s["result"].get("row_count"),
@@ -94,7 +107,8 @@ def ask(question: str, mode: str, thinking: bool) -> None:
 
     start = time.time()
     try:
-        with open(os.devnull, "w") as quiet, contextlib.redirect_stderr(quiet):  # debug lines
+        with (open(os.devnull, "w") as quiet, contextlib.redirect_stderr(quiet),  # debug lines
+              llm_usage.track() as llm_calls):
             trace = run(question, enable_thinking=thinking, return_trace=True)
     except APIConnectionError:
         sys.exit("A model server is not reachable. It may be restarting (05:00 and 17:00) or "
@@ -119,7 +133,8 @@ def ask(question: str, mode: str, thinking: bool) -> None:
         print("    " + show_rows(step["result"]).replace("\n", "\n    "))
     print(f"\n=== Answer ({seconds} s)\n{trace['answer']}")
 
-    run_id = log_run(question, trace, mode, seconds, "cli", thinking, getpass.getuser())
+    run_id = log_run(question, trace, mode, seconds, "cli", thinking, getpass.getuser(),
+                     llm_usage.summary(llm_calls))
     print(f"\n(run id {run_id}; mark it with: scripts/ask.sh --feedback {run_id} correct|wrong "
           f"\"note\")")
 

@@ -14,7 +14,8 @@ with "map": true; the response then also carries map hints (map_hints.py) that t
 to show the ships, places, time or route behind the answer.
 
 Every question is logged with an id to logs/questions/<date>.jsonl (ask.log_run, as for the
-CLI); POST /feedback {"id", "verdict": "correct"|"wrong", "note"} records a verdict on it.
+CLI), with the LLM calls it took (llm_usage.py) and the size of the learned-question store;
+POST /feedback {"id", "verdict": "correct"|"wrong", "note"} records a verdict on it.
 
 Then from anywhere on the AAU network:
     curl -X POST http://ailab-fe01:8100/ask -H "Content-Type: application/json" \
@@ -29,6 +30,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 import agent
+import llm_usage
 import planner
 from ask import log_run, save_feedback
 from map_hints import describe, map_hints
@@ -73,27 +75,29 @@ def ask(req: AskRequest):
         raise HTTPException(status_code=400, detail="question must not be empty")
     source = "map" if req.map else "api"
     start = time.time()
-    try:
-        run = {"routed": planner.run_routed, "planner": planner.run, "single": agent.run}[req.mode]
-        max_turns = req.max_turns or (6 if req.mode == "single" else 10)
-        extra = {"map_view": True} if req.map and req.mode == "routed" else {}
-        result = run(
-            req.question,
-            max_turns=max_turns,
-            enable_thinking=req.enable_thinking,
-            return_trace=True,
-            **extra,
-        )
-        if req.map:
-            result["map"] = map_hints(req.question, result)
-            if result.get("answer") == planner.MAP_REPLY:  # a map request: say what is shown
-                result["answer"] = describe(result["map"])
-    except Exception as e:
-        log_run(req.question, {"error": str(e)}, req.mode, round(time.time() - start, 1), source,
-                req.enable_thinking)
-        raise HTTPException(status_code=502, detail=f"agent error: {e}")
+    with llm_usage.track() as llm_calls:
+        try:
+            run = {"routed": planner.run_routed, "planner": planner.run,
+                   "single": agent.run}[req.mode]
+            max_turns = req.max_turns or (6 if req.mode == "single" else 10)
+            extra = {"map_view": True} if req.map and req.mode == "routed" else {}
+            result = run(
+                req.question,
+                max_turns=max_turns,
+                enable_thinking=req.enable_thinking,
+                return_trace=True,
+                **extra,
+            )
+            if req.map:
+                result["map"] = map_hints(req.question, result)
+                if result.get("answer") == planner.MAP_REPLY:  # a map request: say what is shown
+                    result["answer"] = describe(result["map"])
+        except Exception as e:
+            log_run(req.question, {"error": str(e)}, req.mode, round(time.time() - start, 1),
+                    source, req.enable_thinking, llm=llm_usage.summary(llm_calls))
+            raise HTTPException(status_code=502, detail=f"agent error: {e}")
     result["id"] = log_run(req.question, result, req.mode, round(time.time() - start, 1), source,
-                           req.enable_thinking)
+                           req.enable_thinking, llm=llm_usage.summary(llm_calls))
     return result
 
 

@@ -51,6 +51,7 @@ try:
 except ModuleNotFoundError:  # Python < 3.11 on the login node
     import tomli as tomllib
 
+import llm_usage
 import places
 from ais_tool import QUERY_TIMEOUT_SECONDS, extract_sql, query_ais_data, schema_context
 
@@ -278,11 +279,9 @@ def cmd_answers(args) -> None:
 
 
 def cmd_run(args) -> None:
-    from openai import OpenAI
-
     from agent import MODEL_PATH, get_base_url
 
-    client = OpenAI(base_url=args.base_url or get_base_url(), api_key="not-needed")
+    client = llm_usage.client(args.base_url or get_base_url())
     model = args.model or MODEL_PATH
     context = schema_context()
     known = places.load(include_learned=False)  # eval must not drift with learned places
@@ -364,10 +363,12 @@ def cmd_agent(args) -> None:
             continue
         for i, text in enumerate([q["question"], *q.get("paraphrases", [])]):
             t = time.time()
-            try:
-                trace = run(text, return_trace=True)
-            except Exception as e:  # endpoint down, context too long, ...
-                trace = {"answer": f"agent error: {e}", "tool_calls": []}
+            with llm_usage.track() as llm_calls:
+                try:
+                    trace = run(text, return_trace=True)
+                except Exception as e:  # endpoint down, context too long, ...
+                    trace = {"answer": f"agent error: {e}", "tool_calls": []}
+            llm = llm_usage.summary(llm_calls)
             if expect != "answer":
                 text = trace["answer"] or ""
                 ok = ((trace.get("route") == "reply" or bool(CANNOT_RE.search(text)))
@@ -381,7 +382,7 @@ def cmd_agent(args) -> None:
                     "answer": trace["answer"], "plan": trace.get("plan"),
                     "calls": [{"request": c.get("request"), "sql": c["sql"],
                                "error": c["result"].get("error")} for c in trace["tool_calls"]],
-                    "seconds": round(time.time() - t, 1),
+                    "seconds": round(time.time() - t, 1), "llm": llm,
                 })
                 print(f"{expect} {'ok' if ok else '--'}  {q['id']:24} v{i}  route "
                       f"{trace.get('route')}, {records[-1]['seconds']}s", flush=True)
@@ -422,7 +423,7 @@ def cmd_agent(args) -> None:
                 "answer": trace["answer"], "plan": trace.get("plan"),
                 "calls": [{"request": c.get("request"), "sql": c["sql"],
                            "error": c["result"].get("error")} for c in trace["tool_calls"]],
-                "seconds": round(time.time() - t, 1),
+                "seconds": round(time.time() - t, 1), "llm": llm,
             })
             n_err = sum(c["error"] is not None for c in records[-1]["calls"])
             print(f"data {'ok' if correct else '--'}  answer {'ok' if answer_ok else '--'}  "
@@ -455,11 +456,9 @@ def cmd_bare(args) -> None:
     is right when every reference value appears in the answer, a reply question when the
     answer says it cannot answer from the data (or declines), a clarify question when it
     asks for what is missing."""
-    from openai import OpenAI
-
     from agent import MODEL_PATH, get_base_url
 
-    client = OpenAI(base_url=args.base_url or get_base_url(), api_key="not-needed")
+    client = llm_usage.client(args.base_url or get_base_url())
     model = args.model or MODEL_PATH
     answers = json.loads(args.answers.read_text())
     records = []

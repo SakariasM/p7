@@ -46,6 +46,7 @@ from pathlib import Path
 import places
 from ais_tool import PROJECT_DIR, query_ais_data
 from ask import FEEDBACK_FILE, LOG_DIR
+import planner
 from planner import (_MONTH_NAMES, DATA_FIRST, DATA_LAST, FIRST_DAY, LAST_DAY, TYPE_SYNONYMS,
                      day_text, spell_out)
 
@@ -588,6 +589,14 @@ def load() -> dict | None:
     if _loaded["mtime"] != mtime:
         _loaded.update(mtime=mtime, store=json.loads(STORE_FILE.read_text()), vectors=None)
     return _loaded["store"]
+
+
+def snapshot() -> dict:
+    """Whether the store answers questions and how big it is, for the question log."""
+    store = load() or {"patterns": []}
+    return {"on": planner.USE_QUERY_STORE, "built": store.get("built"),
+            "patterns": len(store["patterns"]),
+            "approved": sum(p["status"] == "approved" for p in store["patterns"])}
 
 
 def _approved_wordings(store: dict):

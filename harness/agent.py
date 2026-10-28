@@ -12,8 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-from openai import OpenAI
-
+import llm_usage
 from ais_tool import PROJECT_DIR, TOOL_SCHEMA, query_ais_data
 
 ENDPOINT_FILE = PROJECT_DIR / "serving" / "current_endpoint.txt"
@@ -41,7 +40,7 @@ def get_base_url() -> str:
 
 
 def run(question: str, max_turns: int = 6, enable_thinking: bool = False, return_trace: bool = False):
-    client = OpenAI(base_url=get_base_url(), api_key="not-needed")
+    client = llm_usage.client(get_base_url())
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},

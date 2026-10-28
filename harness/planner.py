@@ -31,6 +31,7 @@ from pathlib import Path
 from openai import OpenAI
 
 import functions
+import llm_usage
 import places
 from agent import MODEL_PATH, get_base_url
 from ais_tool import (_DATES, CONTEXT_DAYS, DATE_RANGE, DEFAULT_ROW_LIMIT, HAVE_VESSEL_DAYS,
@@ -406,7 +407,7 @@ def for_planner(step: dict) -> dict:
 def run_student_only(question: str, return_trace: bool = False, **_):
     """Baseline without a planner: the student gets the question itself, one SQL query, and
     the answer is the query result."""
-    student = OpenAI(base_url=student_base_url(), api_key="not-needed")
+    student = llm_usage.client(student_base_url())
     step = ask_data(student, question)
     result = step["result"]
     answer = (f"Error: {result['error']}" if "error" in result else
@@ -420,11 +421,11 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
         return_trace: bool = False, sql_writer: str = "student"):
     """sql_writer="8b" lets the 8B write the SQL for its own requests instead of the student
     (same prompt, place list and guards), to measure what the student adds."""
-    planner = OpenAI(base_url=get_base_url(), api_key="not-needed")
+    planner = llm_usage.client(get_base_url())
     if sql_writer == "8b":
         student, sql_model = planner, MODEL_PATH
     else:
-        student = OpenAI(base_url=student_base_url(), api_key="not-needed")
+        student = llm_usage.client(student_base_url())
         sql_model = STUDENT_MODEL
 
     messages = [
@@ -901,7 +902,7 @@ def run_routed(question: str, max_turns: int = 10, enable_thinking: bool = False
                  "question_as_read": question}
         return trace if return_trace else period_reply
     note = "\n".join(n for n in (relative_note, note) if n)
-    planner = OpenAI(base_url=get_base_url(), api_key="not-needed")
+    planner = llm_usage.client(get_base_url())
     trace, warning = _run_learned(planner, question, map_view) if USE_QUERY_STORE else (None, None)
     if trace is None:
         choice, reason = route(planner, question)
@@ -1012,7 +1013,7 @@ def _run_route(planner: OpenAI, question: str, choice: str, reason: str, max_tur
                  "route": "reply", "route_reason": reason}
         return trace
     if choice == "direct":
-        student = OpenAI(base_url=student_base_url(), api_key="not-needed")
+        student = llm_usage.client(student_base_url())
         step = ask_data(student, question)
         result = step["result"]
         if "error" not in result and result.get("rows"):
