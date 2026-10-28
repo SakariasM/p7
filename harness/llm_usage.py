@@ -10,13 +10,12 @@ import contextlib
 import contextvars
 import json
 
-import httpx
 from openai import DefaultHttpxClient, OpenAI
 
 _calls: contextvars.ContextVar[list | None] = contextvars.ContextVar("llm_calls", default=None)
 
 
-def _record(response: httpx.Response) -> None:
+def _record(response) -> None:  # the HTTP response of openai's own httpx (httpx2)
     calls = _calls.get()
     if calls is None or not response.request.url.path.endswith("/chat/completions"):
         return
