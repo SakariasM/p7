@@ -193,13 +193,14 @@ GROUP BY 1 ORDER BY count(DISTINCT mmsi) DESC, destination LIMIT 3
 
 [[question]]
 id = "mega_ships"
+# Over 400 m is an AIS error (schema rule): SANTANDER's 436 m is left out (2026-10-28).
 question = "Which cargo ships at least 390 m long were seen from 22 to 24 September?"
 paraphrases = ["List the cargo vessels with a length of 390 metres or more between 22 and 24 September"]
 tags = ["vessel_lookup", "ship_type", "time_window"]
 sql = """
 SELECT DISTINCT mmsi FROM vessel_positions
 WHERE date BETWEEN DATE '2026-09-22' AND DATE '2026-09-24'
-  AND ship_type = 'Cargo' AND length >= 390
+  AND ship_type = 'Cargo' AND length >= 390 AND length <= 400
 ORDER BY mmsi
 """
 
