@@ -672,6 +672,11 @@ _RELATIVE_RE = re.compile(
     rf"|(?:last|past) {_SMALL} (days|weeks|hours))\b(?!\s+of\b)", re.IGNORECASE)
 
 
+def _relative_count(m: re.Match) -> int:
+    """The N in "last N days/weeks/hours"."""
+    return int(m.group(2)) if m.group(2).isdigit() else _NUMBER_WORDS[m.group(2).lower()]
+
+
 def _relative_period(m: re.Match, today: date) -> tuple[date, date]:
     phrase = m.group(1).lower()
     if phrase in ("yesterday", "last night"):
@@ -688,9 +693,10 @@ def _relative_period(m: re.Match, today: date) -> tuple[date, date]:
         last = today.replace(day=1) - timedelta(days=1)
         return last.replace(day=1), last
     if m.group(2):
-        n = int(m.group(2)) if m.group(2).isdigit() else _NUMBER_WORDS[m.group(2).lower()]
+        n = _relative_count(m)
         unit = m.group(3).lower()
-        days = 7 * n if unit == "weeks" else (n if unit == "days" else 1)
+        # Hours in whole days (the data has no live end time): the last 70 hours -> 3 days.
+        days = 7 * n if unit == "weeks" else (n if unit == "days" else -(-n // 24))
         return today - timedelta(days=days - 1), today
     return today, today  # now, currently, today, ...
 
@@ -707,8 +713,10 @@ def resolve_relative(question: str) -> tuple[str, str | None]:
     rest = re.sub(r"\s+([?.!,])", r"\1", re.sub(r"\s{2,}", " ", rest))
     end = re.search(r"[?.!]*$", rest)
     rewritten = f"{rest[:end.start()].rstrip(', ')} {when}{end.group(0) or '?'}"
-    note = (f'Note: "{m.group(1)}" is read as {when.split(" ", 1)[1]}, the latest data available '
-            f"(the data covers {PERIOD_TEXT}; there are no live positions).")
+    whole = (" (whole days)" if m.group(3) and m.group(3).lower() == "hours"
+             and _relative_count(m) % 24 else "")
+    note = (f'Note: "{m.group(1)}" is read as {when.split(" ", 1)[1]}{whole}, the latest data '
+            f"available (the data covers {PERIOD_TEXT}; there are no live positions).")
     return rewritten, note
 
 
