@@ -103,14 +103,12 @@ def create_app(store: AisStore | None) -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.post("/ask", include_in_schema=False)
-    def ask(body: Annotated[dict[str, object], Body()]) -> JSONResponse:
-        """Forward a question from the map page to the agent harness (with "map": true).
-        A plain def: FastAPI runs it in a worker thread, so a slow answer does not hold up
-        the map's other requests."""
-        payload = json.dumps({"question": str(body.get("question", "")), "map": True}).encode()
+    def forward(path: str, payload: dict[str, object]) -> JSONResponse:
+        """POST to the agent harness and pass its JSON reply (or what went wrong) back."""
         req = urllib.request.Request(
-            f"{HARNESS_URL}/ask", data=payload, headers={"Content-Type": "application/json"}
+            f"{HARNESS_URL}{path}",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
         )
         try:
             with urllib.request.urlopen(req, timeout=ASK_TIMEOUT_S) as r:
@@ -122,6 +120,21 @@ def create_app(store: AisStore | None) -> FastAPI:
             return JSONResponse(
                 {"detail": f"harness not reachable at {HARNESS_URL}: {e}"}, status_code=503
             )
+
+    @app.post("/ask", include_in_schema=False)
+    def ask(body: Annotated[dict[str, object], Body()]) -> JSONResponse:
+        """Forward a question from the map page to the agent harness (with "map": true).
+        A plain def: FastAPI runs it in a worker thread, so a slow answer does not hold up
+        the map's other requests."""
+        return forward("/ask", {"question": str(body.get("question", "")), "map": True})
+
+    @app.post("/feedback", include_in_schema=False)
+    def feedback(body: Annotated[dict[str, object], Body()]) -> JSONResponse:
+        """Forward a verdict on an answer (its id, correct or wrong, a note) to the harness."""
+        return forward(
+            "/feedback",
+            {k: str(body.get(k, "")) for k in ("id", "verdict", "note")},
+        )
 
     @app.get("/vessels", response_model=list[VesselSummary], tags=["vessels"])
     def search_vessels(

@@ -148,3 +148,12 @@ def test_ui_page_is_served_but_not_in_the_contract(client: TestClient) -> None:
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
     assert "/" not in client.get("/openapi.json").json()["paths"]
+
+
+def test_ask_and_feedback_without_harness(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("ais.api.HARNESS_URL", "http://127.0.0.1:9")
+    assert client.post("/ask", json={"question": "How many?"}).status_code == 503
+    r = client.post("/feedback", json={"id": "20261028-120000-abc123", "verdict": "correct"})
+    assert r.status_code == 503

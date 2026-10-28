@@ -35,6 +35,7 @@
   }
   .row { display: flex; gap: 8px; align-items: end; }
   .row > * { flex: 1; }
+  .row[hidden] { display: none; }
   button {
     padding: 7px 12px; border: 1px solid var(--accent); border-radius: 6px;
     background: var(--accent); color: var(--accent-text); cursor: pointer;
@@ -97,6 +98,15 @@
     </div>
     <div id="ask-status" class="status"></div>
     <div id="ask-answer" class="answer" hidden></div>
+    <div id="ask-feedback" class="hint" hidden>
+      <span id="ask-fb-text">Was this answer right?</span>
+      <span id="ask-fb-buttons"><button class="link" id="ask-fb-yes">Yes</button> ·
+        <button class="link" id="ask-fb-no">No</button></span>
+      <div id="ask-fb-note" class="row" style="margin-top:6px" hidden>
+        <input id="ask-note" placeholder="What was wrong? (optional)">
+        <button id="ask-fb-send" style="flex:0 0 70px">Send</button>
+      </div>
+    </div>
     <ul id="ask-vessels" class="list" style="margin-top:8px"></ul>
   </section>
 
@@ -543,11 +553,43 @@ async function showOnMap(h) {
   if (h.action) await loadSnapshot();
 }
 
+// Feedback: the harness logs every question with an id; "Yes" or "No" (with an optional
+// note) records a verdict on it, which the harness can later learn from.
+let runId = null;
+
+function showFeedback(id) {
+  runId = id || null;
+  $("ask-feedback").hidden = !runId;
+  $("ask-fb-text").textContent = "Was this answer right?";
+  $("ask-fb-buttons").hidden = false;
+  $("ask-fb-note").hidden = true;
+  $("ask-note").value = "";
+}
+
+async function sendFeedback(verdict) {
+  const note = verdict === "wrong" ? $("ask-note").value.trim() : "";
+  $("ask-fb-send").disabled = true;
+  try {
+    const r = await fetch("/feedback", { method: "POST", headers: { "Content-Type": "application/json" },
+                                         body: JSON.stringify({ id: runId, verdict, note }) });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.detail || r.statusText);
+    $("ask-fb-text").textContent = "Thanks, saved.";
+    $("ask-fb-buttons").hidden = true;
+    $("ask-fb-note").hidden = true;
+  } catch (e) {
+    setStatus("ask-status", `Feedback not saved: ${e.message}`, true);
+  } finally {
+    $("ask-fb-send").disabled = false;
+  }
+}
+
 async function ask() {
   const question = $("ask-q").value.trim();
   if (!question) return;
   $("ask-btn").disabled = true;
   $("ask-answer").hidden = true;
+  showFeedback(null);
   $("ask-vessels").innerHTML = "";
   setStatus("ask-status", "Thinking… simple questions take about 10 s, harder ones up to a minute");
   const t0 = performance.now();
@@ -558,6 +600,7 @@ async function ask() {
     if (!r.ok) throw new Error(body.detail || r.statusText);
     $("ask-answer").textContent = body.answer;
     $("ask-answer").hidden = false;
+    showFeedback(body.id);
     const secs = ((performance.now() - t0) / 1000).toFixed(0);
     setStatus("ask-status", `Answered in ${secs} s`);
     await showOnMap(body.map || {});
@@ -568,6 +611,10 @@ async function ask() {
   }
 }
 $("ask-btn").onclick = ask;
+$("ask-fb-yes").onclick = () => sendFeedback("correct");
+$("ask-fb-no").onclick = () => { $("ask-fb-buttons").hidden = true; $("ask-fb-note").hidden = false; $("ask-note").focus(); };
+$("ask-fb-send").onclick = () => sendFeedback("wrong");
+$("ask-note").addEventListener("keydown", e => { if (e.key === "Enter") sendFeedback("wrong"); });
 $("ask-q").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(); } });
 $("ask-examples").addEventListener("click", e => {
   const b = e.target.closest("button");
@@ -581,6 +628,7 @@ $("ask-clear").onclick = () => {
   highlight = new Set();
   $("ask-q").value = "";
   $("ask-answer").hidden = true;
+  showFeedback(null);
   $("ask-vessels").innerHTML = "";
   setStatus("ask-status", "");
   loadSnapshot();

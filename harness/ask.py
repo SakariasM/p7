@@ -11,7 +11,8 @@ the rows or errors, and the final answer. Needs the llm-serve and llm-student jo
 
 Every run is appended to logs/questions/<date>.jsonl with an id; feedback is appended to
 logs/questions/feedback.jsonl. Both files are append-only (nothing is rewritten), and they
-are the raw material for test questions and, later, for learning from experience.
+are the raw material for test questions and, later, for learning from experience. api.py
+logs the questions asked on the map the same way (log_run, save_feedback).
 """
 
 import argparse
@@ -21,6 +22,7 @@ import json
 import os
 import secrets
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -29,12 +31,45 @@ from ais_tool import PROJECT_DIR
 LOG_DIR = PROJECT_DIR / "logs" / "questions"
 FEEDBACK_FILE = LOG_DIR / "feedback.jsonl"
 SHOW_ROWS = 10
+LOG_ROWS = 20  # result rows kept per step in the log
+_append_lock = threading.Lock()  # api.py answers in several threads
 
 
 def append(path: Path, record: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a") as f:
-        f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    line = json.dumps(record, ensure_ascii=False, default=str) + "\n"
+    with _append_lock, path.open("a") as f:
+        f.write(line)
+
+
+def log_run(question: str, trace: dict, mode: str, seconds: float, source: str,
+            thinking: bool = False, user: str | None = None) -> str:
+    """Append one answered (or failed) question to today's log; returns its run id."""
+    run_id = time.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(3)
+    append(LOG_DIR / f"{time.strftime('%Y-%m-%d')}.jsonl", {
+        "id": run_id, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "source": source,
+        "user": user, "mode": mode, "route": trace.get("route"),
+        "route_reason": trace.get("route_reason"), "thinking": thinking,
+        "question": question, "question_as_read": trace.get("question_as_read"),
+        "plan": trace.get("plan"), "answer": trace.get("answer"), "error": trace.get("error"),
+        "seconds": seconds, "place_calls": trace.get("place_calls", []),
+        "steps": [{"request": s.get("request"), "places": s.get("places"), "sql": s.get("sql"),
+                   "error": s["result"].get("error"), "columns": s["result"].get("columns"),
+                   "row_count": s["result"].get("row_count"),
+                   "rows": s["result"].get("rows", [])[:LOG_ROWS]}
+                  for s in trace.get("tool_calls", [])],
+    })
+    return run_id
+
+
+def save_feedback(run_id: str, verdict: str, note: str, by: str | None) -> bool:
+    """Append a verdict (correct or wrong) for a logged run; False if no run has that id."""
+    key = f'"id": "{run_id}"'
+    known = any(key in line for f in LOG_DIR.glob("20*.jsonl") for line in f.open())
+    if known:
+        append(FEEDBACK_FILE, {"id": run_id, "verdict": verdict, "note": note, "by": by,
+                               "at": time.strftime("%Y-%m-%dT%H:%M:%S")})
+    return known
 
 
 def show_rows(result: dict) -> str:
@@ -84,16 +119,7 @@ def ask(question: str, mode: str, thinking: bool) -> None:
         print("    " + show_rows(step["result"]).replace("\n", "\n    "))
     print(f"\n=== Answer ({seconds} s)\n{trace['answer']}")
 
-    run_id = time.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
-    append(LOG_DIR / f"{time.strftime('%Y-%m-%d')}.jsonl", {
-        "id": run_id, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "user": getpass.getuser(),
-        "mode": mode, "route": trace.get("route"), "thinking": thinking,
-        "question": question, "plan": trace.get("plan"), "answer": trace["answer"],
-        "seconds": seconds, "place_calls": trace.get("place_calls", []),
-        "steps": [{"request": s.get("request"), "places": s.get("places"), "sql": s.get("sql"),
-                   "error": s["result"].get("error"),
-                   "rows": s["result"].get("rows", [])[:20]} for s in trace["tool_calls"]],
-    })
+    run_id = log_run(question, trace, mode, seconds, "cli", thinking, getpass.getuser())
     print(f"\n(run id {run_id}; mark it with: scripts/ask.sh --feedback {run_id} correct|wrong "
           f"\"note\")")
 
@@ -101,11 +127,8 @@ def ask(question: str, mode: str, thinking: bool) -> None:
 def feedback(run_id: str, verdict: str, note: str) -> None:
     if verdict not in ("correct", "wrong"):
         sys.exit("verdict must be correct or wrong")
-    known = any(run_id in line for f in LOG_DIR.glob("20*.jsonl") for line in f.open())
-    if not known:
+    if not save_feedback(run_id, verdict, note, getpass.getuser()):
         sys.exit(f"no run with id {run_id} in {LOG_DIR}")
-    append(FEEDBACK_FILE, {"id": run_id, "verdict": verdict, "note": note,
-                           "by": getpass.getuser(), "at": time.strftime("%Y-%m-%dT%H:%M:%S")})
     print(f"feedback saved for {run_id}: {verdict}")
 
 
