@@ -1,0 +1,191 @@
+[
+ {
+  "id": "at_moment_01",
+  "question": "Which vessels were in Flensburg at 17:00 UTC on September 23?",
+  "tags": [
+   "at_moment",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date = DATE '2026-09-23' AND lon BETWEEN 9.429 AND 9.457 AND lat BETWEEN 54.785 AND 54.818 AND ts > TIMESTAMP '2026-09-23 17:00:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-23 17:00:00' ORDER BY mmsi"
+ },
+ {
+  "id": "at_moment_02",
+  "question": "Which vessels were in Trelleborg at 13:00 UTC on 23 September?",
+  "tags": [
+   "at_moment",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date = DATE '2026-09-23' AND lon BETWEEN 13.141 AND 13.165 AND lat BETWEEN 55.358 AND 55.375 AND ts > TIMESTAMP '2026-09-23 13:00:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-23 13:00:00' ORDER BY mmsi"
+ },
+ {
+  "id": "at_moment_03",
+  "question": "Which vessels were in Næstved at 08:00 UTC on 24 September 2026?",
+  "tags": [
+   "at_moment",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date = DATE '2026-09-24' AND lon BETWEEN 11.727 AND 11.759 AND lat BETWEEN 55.21 AND 55.23 AND ts > TIMESTAMP '2026-09-24 08:00:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-24 08:00:00' ORDER BY mmsi"
+ },
+ {
+  "id": "in_window_01",
+  "question": "Which cargo ships were in Rødbyhavn between 18:00 and 20:00 UTC on 22 September?",
+  "tags": [
+   "in_window",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date = DATE '2026-09-22' AND ts >= TIMESTAMP '2026-09-22 18:00:00' AND ts < TIMESTAMP '2026-09-22 20:00:00' AND lon BETWEEN 11.339 AND 11.384 AND lat BETWEEN 54.619 AND 54.656 AND ship_type = 'Cargo' ORDER BY mmsi"
+ },
+ {
+  "id": "in_window_02",
+  "question": "Which cargo ships were in the Little Belt between 13:00 and 15:00 UTC on September 24?",
+  "tags": [
+   "in_window",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date = DATE '2026-09-24' AND ts >= TIMESTAMP '2026-09-24 13:00:00' AND ts < TIMESTAMP '2026-09-24 15:00:00' AND lon BETWEEN 9.55 AND 10.05 AND lat BETWEEN 54.90 AND 55.65 AND ship_type = 'Cargo' ORDER BY mmsi"
+ },
+ {
+  "id": "in_window_03",
+  "question": "Which cargo ships were in Kristiansand between 08:00 and 10:00 UTC on 22 September?",
+  "tags": [
+   "in_window",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date = DATE '2026-09-22' AND ts >= TIMESTAMP '2026-09-22 08:00:00' AND ts < TIMESTAMP '2026-09-22 10:00:00' AND lon BETWEEN 7.968 AND 8.006 AND lat BETWEEN 58.118 AND 58.147 AND ship_type = 'Cargo' ORDER BY mmsi"
+ },
+ {
+  "id": "on_day_01",
+  "question": "What ships were seen in Arendal on 23 September?",
+  "tags": [
+   "on_day",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date = DATE '2026-09-23' AND lon BETWEEN 8.761 AND 8.785 AND lat BETWEEN 58.436 AND 58.465 ORDER BY mmsi"
+ },
+ {
+  "id": "on_day_02",
+  "question": "What ships were seen in Sölvesborg on September 24?",
+  "tags": [
+   "on_day",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date = DATE '2026-09-24' AND lon BETWEEN 14.573 AND 14.59 AND lat BETWEEN 56.028 AND 56.053 ORDER BY mmsi"
+ },
+ {
+  "id": "on_day_03",
+  "question": "What ships were seen in Mukran on 23 September?",
+  "tags": [
+   "on_day",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date = DATE '2026-09-23' AND lon BETWEEN 13.577 AND 13.602 AND lat BETWEEN 54.475 AND 54.489 ORDER BY mmsi"
+ },
+ {
+  "id": "docked_moment_01",
+  "question": "Which ships were docked in Heiligenhafen at 06:30 on 22 September?",
+  "tags": [
+   "docked_moment",
+   "list"
+  ],
+  "sql": "SELECT mmsi FROM (SELECT mmsi, arg_max(sog, ts) AS sog FROM vessel_positions WHERE date = DATE '2026-09-22' AND lon BETWEEN 10.98 AND 11.009 AND lat BETWEEN 54.369 AND 54.38 AND ts > TIMESTAMP '2026-09-22 06:30:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-22 06:30:00' GROUP BY mmsi) WHERE sog < 0.5 ORDER BY mmsi"
+ },
+ {
+  "id": "docked_moment_02",
+  "question": "Which ships were docked in Trelleborg at 02:30 on 24 September?",
+  "tags": [
+   "docked_moment",
+   "list"
+  ],
+  "sql": "SELECT mmsi FROM (SELECT mmsi, arg_max(sog, ts) AS sog FROM vessel_positions WHERE date = DATE '2026-09-24' AND lon BETWEEN 13.141 AND 13.165 AND lat BETWEEN 55.358 AND 55.375 AND ts > TIMESTAMP '2026-09-24 02:30:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-24 02:30:00' GROUP BY mmsi) WHERE sog < 0.5 ORDER BY mmsi"
+ },
+ {
+  "id": "docked_moment_03",
+  "question": "Which ships were docked in Sønderborg at 17:30 on September 23?",
+  "tags": [
+   "docked_moment",
+   "list"
+  ],
+  "sql": "SELECT mmsi FROM (SELECT mmsi, arg_max(sog, ts) AS sog FROM vessel_positions WHERE date = DATE '2026-09-23' AND lon BETWEEN 9.763 AND 9.788 AND lat BETWEEN 54.904 AND 54.92 AND ts > TIMESTAMP '2026-09-23 17:30:00' - INTERVAL 10 MINUTE AND ts <= TIMESTAMP '2026-09-23 17:30:00' GROUP BY mmsi) WHERE sog < 0.5 ORDER BY mmsi"
+ },
+ {
+  "id": "docked_day_01",
+  "question": "List the vessels that docked in Gudhjem on 23 September.",
+  "tags": [
+   "docked_day",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date = DATE '2026-09-23' AND lon BETWEEN 14.964 AND 14.976 AND lat BETWEEN 55.209 AND 55.219 AND sog < 0.5 ORDER BY mmsi"
+ },
+ {
+  "id": "docked_day_02",
+  "question": "List the vessels that docked in Svendborg on September 23.",
+  "tags": [
+   "docked_day",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date = DATE '2026-09-23' AND lon BETWEEN 10.612 AND 10.645 AND lat BETWEEN 55.048 AND 55.066 AND sog < 0.5 ORDER BY mmsi"
+ },
+ {
+  "id": "docked_day_03",
+  "question": "List the vessels that docked in Lindø Havn on 23 September 2026.",
+  "tags": [
+   "docked_day",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date = DATE '2026-09-23' AND lon BETWEEN 10.533 AND 10.557 AND lat BETWEEN 55.47 AND 55.484 AND sog < 0.5 ORDER BY mmsi"
+ },
+ {
+  "id": "under_bridge_01",
+  "question": "Which cargo ships passed under the Little Belt bridges on September 23?",
+  "tags": [
+   "under_bridge",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date = DATE '2026-09-23' AND lon BETWEEN 9.66 AND 9.74 AND lat BETWEEN 55.495 AND 55.525 AND sog >= 1 AND ship_type = 'Cargo' ORDER BY mmsi"
+ },
+ {
+  "id": "under_bridge_02",
+  "question": "Which cargo ships passed under the Little Belt bridges on 22 September?",
+  "tags": [
+   "under_bridge",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date = DATE '2026-09-22' AND lon BETWEEN 9.66 AND 9.74 AND lat BETWEEN 55.495 AND 55.525 AND sog >= 1 AND ship_type = 'Cargo' ORDER BY mmsi"
+ },
+ {
+  "id": "under_bridge_03",
+  "question": "Which passenger ships passed under the Great Belt Bridge on September 24?",
+  "tags": [
+   "under_bridge",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date = DATE '2026-09-24' AND lon BETWEEN 10.855 AND 11.09 AND lat BETWEEN 55.30 AND 55.355 AND sog >= 1 AND ship_type = 'Passenger' ORDER BY mmsi"
+ },
+ {
+  "id": "long_ships_01",
+  "question": "Which ships longer than 270 m were in the Danish North Sea from 22 to 24 September 2026?",
+  "tags": [
+   "long_ships",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date BETWEEN DATE '2026-09-22' AND DATE '2026-09-24' AND lon BETWEEN 4.00 AND 8.50 AND lat BETWEEN 55.00 AND 57.50 AND length > 270 AND length <= 400 ORDER BY mmsi"
+ },
+ {
+  "id": "long_ships_02",
+  "question": "Which ships longer than 280 m were in the Kattegat from 22 to 24 September 2026?",
+  "tags": [
+   "long_ships",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date BETWEEN DATE '2026-09-22' AND DATE '2026-09-24' AND lon BETWEEN 10.50 AND 12.50 AND lat BETWEEN 56.00 AND 57.60 AND length > 280 AND length <= 400 ORDER BY mmsi"
+ },
+ {
+  "id": "long_ships_03",
+  "question": "Which ships longer than 270 m were in Cuxhaven from 22 to 24 September 2026?",
+  "tags": [
+   "long_ships",
+   "list"
+  ],
+  "sql": "SELECT DISTINCT mmsi FROM vessel_positions WHERE date BETWEEN DATE '2026-09-22' AND DATE '2026-09-24' AND lon BETWEEN 8.698 AND 8.751 AND lat BETWEEN 53.846 AND 53.88 AND length > 270 AND length <= 400 ORDER BY mmsi"
+ }
+]
