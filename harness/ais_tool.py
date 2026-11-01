@@ -87,7 +87,15 @@ def schema_context(days: bool | None = None) -> str:
 
 
 # Every query connection gets these.
+# in_port(lon, lat): inside any port box of places.json ("not at port" over all ports, sql-v7).
+# Read directly: places.py imports this module.
+_PORT_BOXES = [p["box"] for p in json.loads(
+    Path(__file__).with_name("places.json").read_text())["places"] if p["kind"] == "port"]
+_IN_PORT = " OR ".join(f"(lon BETWEEN {b[0]} AND {b[2]} AND lat BETWEEN {b[1]} AND {b[3]})"
+                       for b in _PORT_BOXES) or "false"
+
 SETUP_SQL = f"""
+CREATE MACRO in_port(lon, lat) AS ({_IN_PORT});
 CREATE MACRO haversine_m(lat1, lon1, lat2, lon2) AS
   2 * 6371008.8 * asin(sqrt(
       pow(sin(radians(lat2 - lat1) / 2), 2)

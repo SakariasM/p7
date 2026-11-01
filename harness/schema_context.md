@@ -27,6 +27,9 @@ Rules:
   (arg_max(lat, ts)).
 - Areas are boxes: lon BETWEEN lon_min AND lon_max AND lat BETWEEN lat_min AND lat_max.
 - haversine_m(lat1, lon1, lat2, lon2) gives the distance in metres.
+- in_port(lon, lat) is true inside any known port's box; NOT in_port(lon, lat) means at sea,
+  not at or in any port (when no port is named).
+- Speeds (sog) are in knots; km/h is knots * 1.852, so 20 km/h is sog > 20 / 1.852.
 - Missing text is 'Undefined' or 'Unknown value', not NULL.
 - Harbored, docked or in port at a place means sog < 0.5 inside its box. Moored and at
   anchor are nav_status values: nav_status = 'Moored', nav_status = 'At anchor'.

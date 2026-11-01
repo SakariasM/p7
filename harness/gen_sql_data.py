@@ -7,6 +7,7 @@ Text-to-SQL training data for the student model, with the served Qwen3-8B as tea
     python3 gen_sql_data.py freeform --prompts 300         # -> OUT/freeform.jsonl
     python3 gen_sql_data.py planner --per-template 60      # -> OUT/planner.jsonl
     python3 gen_sql_data.py export [--export-dir DIR]      # -> DIR/train.jsonl, DIR/val.jsonl
+    python3 gen_sql_data.py export --cap-lengths ...       # length bounds capped at 400 m
 
 OUT is $P7_PROJECT_DIR/data/text2sql unless --out-dir is given (before the subcommand).
 On the cluster run it as a CPU job:
@@ -456,6 +457,12 @@ def cmd_export(args) -> None:
     for path in inputs:
         if path.exists():
             records += [json.loads(line) for line in path.open()]
+    if args.cap_lengths:  # older rows taught "length > N" without the cap (sql-v7 fixes that)
+        from planner import cap_lengths
+        capped = [{**r, "sql": cap_lengths(r["sql"])} for r in records]
+        changed = sum(a["sql"] != b["sql"] for a, b in zip(records, capped, strict=True))
+        print(f"--cap-lengths: {changed} queries got the 400 m cap", flush=True)
+        records = capped
     known = gazetteer.load(include_learned=False)
     fixed = gazetteer.mentioned(context.partition(gazetteer.PLACES_HEADER)[2], known)
 
@@ -544,6 +551,8 @@ def main() -> None:
     export.add_argument("--overwrite", action="store_true", help="replace an existing train/val")
     export.add_argument("--inputs", type=Path, nargs="+",
                         help="record files (default: templates/freeform/planner.jsonl in OUT)")
+    export.add_argument("--cap-lengths", action="store_true",
+                        help="give every lower length bound the 400 m cap (planner.cap_lengths)")
     export.add_argument("--dynamic-places", action="store_true",
                         help="per-example place list, as at run time (default: fixed context)")
     export.set_defaults(func=cmd_export)

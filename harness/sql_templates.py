@@ -1320,6 +1320,72 @@ V6_TEMPLATES = [
     harbored_any_at_time, docked_day,
 ]
 
+# --- sql-v7: trajectories ---------------------------------------------------------------
+# "Slowed below X for at least M minutes (not in a port), then sped up above Y within H hours,
+# on day D" (the group's question 11): a run of consecutive slow reports starting that day,
+# then a fast report within H hours after it (which may fall on the next day). Speeds in
+# knots or km/h (sog is in knots); in_port(lon, lat) is ais_tool's macro over all port boxes.
+_AT_SEA = ["outside the ports", "while not in a port", "away from port", "at sea"]
+
+
+def _slow_then_fast(s: Sampler, listing: bool) -> Instance:
+    r = s.rng
+    d = s.day()
+    while d.isoformat() >= _DATES[-1] or d + timedelta(days=1) in EXCLUDED_DATES:
+        d = s.day()
+    kmh = r.random() < 0.4
+    unit, unit_must = ("km/h", r"km/h|kph|kmh|kilomet") if kmh else ("knots", r"knot|\bkn\b|kts")
+    slow, fast = r.choice([5, 10] if kmh else [1, 2, 3, 5]), r.choice([20, 25, 30] if kmh
+                                                                      else [10, 12, 15])
+    minutes, hours = r.choice([20, 30, 60]), r.choice([2, 6, 12])
+    at_sea = r.choice(_AT_SEA) if r.random() < 0.6 else ""
+
+    def sog(v: int) -> str:
+        return f"{v} / 1.852" if kmh else str(v)
+
+    lead = r.choice(["Which ships", "Which vessels", "List the ships that"]) if listing else \
+        r.choice(["How many ships", "How many vessels", "Count the ships that"])
+    slow_unit = "knot" if unit == "knots" and slow == 1 else unit
+    q = (f"{lead} slowed below {slow} {slow_unit} for at least {minutes} minutes"
+         f"{' ' + at_sea if at_sea else ''} and then sped up above {fast} {unit} within "
+         f"{hours} hours, on {d_text(d, r)}{'.' if lead.endswith('that') else '?'}")
+    port = " AND NOT in_port(lon, lat)" if at_sea else ""
+    select = ("DISTINCT seg.mmsi AS mmsi" if listing
+              else "count(DISTINCT seg.mmsi) AS vessels")
+    sql = (f"WITH r AS (\n"
+           f"  SELECT mmsi, ts, sog, sog < {sog(slow)}{port} AS slow FROM vessel_positions\n"
+           f"  WHERE date BETWEEN {d_sql(d)} AND {d_sql(d + timedelta(days=1))} "
+           f"AND sog IS NOT NULL\n"
+           f"), g AS (\n"
+           f"  SELECT *, sum(CASE WHEN slow THEN 0 ELSE 1 END) OVER (PARTITION BY mmsi ORDER BY ts)"
+           f" AS grp FROM r\n"
+           f"), seg AS (\n"
+           f"  SELECT mmsi, max(ts) AS t1 FROM g WHERE slow GROUP BY mmsi, grp\n"
+           f"  HAVING max(ts) - min(ts) >= INTERVAL {minutes} MINUTE "
+           f"AND CAST(min(ts) AS DATE) = {d_sql(d)}\n"
+           f")\n"
+           f"SELECT {select} FROM seg JOIN r ON r.mmsi = seg.mmsi\n"
+           f"  AND r.ts > seg.t1 AND r.ts <= seg.t1 + INTERVAL {hours} HOUR AND r.sog > {sog(fast)}"
+           f"{' ORDER BY mmsi' if listing else ''}")
+    must = [d_must(d), num_must(slow), num_must(fast), num_must(minutes), num_must(hours),
+            unit_must, r"slow|below|under|less than|drop",
+            r"sped|speed|faster|above|over|accelerat",
+            LIST_MUST if listing else r"how many|number|count"]
+    if at_sea:
+        must.append(r"port|harbou?r|at sea|open water")
+    return Instance("list_slow_then_fast" if listing else "slow_then_fast", q, sql, must)
+
+
+def slow_then_fast(s: Sampler) -> Instance:
+    return _slow_then_fast(s, listing=False)
+
+
+def list_slow_then_fast(s: Sampler) -> Instance:
+    return _slow_then_fast(s, listing=True)
+
+
+V7_TEMPLATES = [slow_then_fast, list_slow_then_fast]
+
 TEMPLATES = [
     vessels_on_day, vessels_type_day, vessels_window, vessels_place_window,
     vessels_place_type_range, vessels_every_day, daily_counts, hourly_counts_place,
@@ -1328,4 +1394,4 @@ TEMPLATES = [
     vessel_destination, vessel_static, vessel_distance, underway_type_at_time,
     status_at_time_place, status_share, near_vessel, closest_pair_place, long_ships,
     top_destinations, duplicate_share, non_vessel_rows,
-] + COMPOSITE_TEMPLATES + V5_TEMPLATES + V6_TEMPLATES
+] + COMPOSITE_TEMPLATES + V5_TEMPLATES + V6_TEMPLATES + V7_TEMPLATES
