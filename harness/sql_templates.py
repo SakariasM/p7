@@ -1367,10 +1367,13 @@ def _slow_then_fast(s: Sampler, listing: bool) -> Instance:
            f"SELECT {select} FROM seg JOIN r ON r.mmsi = seg.mmsi\n"
            f"  AND r.ts > seg.t1 AND r.ts <= seg.t1 + INTERVAL {hours} HOUR AND r.sog > {sog(fast)}"
            f"{' ORDER BY mmsi' if listing else ''}")
-    must = [d_must(d), num_must(slow), num_must(fast), num_must(minutes), num_must(hours),
+    minutes_must = {60: r"\b60\b|an hour|one hour|\b1 hour", 30: r"\b30\b|half an hour",
+                    20: r"\b20\b"}[minutes]
+    # "Identify ships that ..." is how the group asked it (question 11).
+    must = [d_must(d), num_must(slow), num_must(fast), minutes_must, num_must(hours),
             unit_must, r"slow|below|under|less than|drop",
             r"sped|speed|faster|above|over|accelerat",
-            LIST_MUST if listing else r"how many|number|count"]
+            LIST_MUST + "|identify|find|give" if listing else r"how many|number|count"]
     if at_sea:
         must.append(r"port|harbou?r|at sea|open water")
     return Instance("list_slow_then_fast" if listing else "slow_then_fast", q, sql, must)
