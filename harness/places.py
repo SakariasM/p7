@@ -1,0 +1,262 @@
+"""
+Named places for the SQL student: lookup, finding the places a request mentions, the
+student's place list, checking SQL boxes, and places learned at runtime.
+
+  places.json                  in the repo, built by build_places.py (manual areas and
+                               AIS-located ports)
+  data/places_learned.jsonl    in the project folder, append-only: planner.py adds a place
+                               the planner proposed and validate() accepted, as "pending";
+                               it is used only for that question until a person approves
+                               it (python3 places.py pending / approve NAME / reject NAME).
+                               The last record per name counts, so nothing is rewritten.
+
+validate() checks size, coverage and that vessels are there; it cannot tell whether a box is
+geographically right (on 2026-10-14 the planner shrank a "Denmark" box until it passed and
+ended in the Skagerrak), hence the human approval.
+"""
+
+import argparse
+import fcntl
+import json
+import re
+import sys
+import time
+import unicodedata
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from ais_tool import _DATES, PROJECT_DIR, connect
+
+PLACES_FILE = Path(__file__).with_name("places.json")
+MANUAL_FILE = Path(__file__).with_name("places_manual.json")
+LEARNED_FILE = PROJECT_DIR / "data" / "places_learned.jsonl"
+PLACES_HEADER = "Places (lon_min, lat_min, lon_max, lat_max):"
+
+COVERAGE = (-5.0, 50.0, 32.0, 64.0)  # vessel_positions keeps lon -5..32, lat 50..64
+MAX_SIDE_DEG = {"port": 0.3, "area": 3.0}
+MIN_SIDE_DEG = 0.002
+MIN_VESSELS = 3  # distinct vessels in the box on the validation days
+# Countries and regions are not places (a box cannot stand for them).
+NOT_PLACES = {"denmark", "danmark", "sweden", "sverige", "norway", "norge", "germany",
+              "deutschland", "poland", "polska", "netherlands", "finland", "scandinavia",
+              "europe", "baltic sea", "north sea", "jutland", "jylland", "zealand", "sjaelland",
+              "funen", "fyn"}
+VALIDATION_DAYS = 3
+
+
+@dataclass
+class Place:
+    name: str
+    box: tuple[float, float, float, float]  # lon_min, lat_min, lon_max, lat_max
+    kind: str = "port"
+    aliases: list[str] = field(default_factory=list)
+    source: str = "manual"
+    status: str = "verified"
+    country: str | None = None  # ISO code for ports (DK, SE, ...), None for sea areas
+
+    def as_dict(self) -> dict:
+        return {"name": self.name, "box": list(self.box), "kind": self.kind,
+                "status": self.status, "source": self.source}
+
+
+def normalise(text: str) -> str:
+    """Lower case, Danish/Swedish/German letters folded (Å->aa, Ø->o, Ö->o, ...), accents
+    dropped, anything else that is not a letter or digit becomes one space."""
+    t = text.lower().replace("å", "aa").replace("æ", "ae").replace("ø", "o")
+    t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode()
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", t).split())
+
+
+def learned_records() -> dict[str, dict]:
+    """The latest record per learned place name (the file is append-only)."""
+    if not LEARNED_FILE.exists():
+        return {}
+    with LEARNED_FILE.open() as f:
+        fcntl.flock(f, fcntl.LOCK_SH)
+        lines = f.read().splitlines()
+        fcntl.flock(f, fcntl.LOCK_UN)
+    latest: dict[str, dict] = {}
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:  # a line being written right now
+            continue
+        latest[normalise(record["name"])] = record
+    return latest
+
+
+def load(include_learned: bool = True) -> list[Place]:
+    """places.json, plus the learned places a person approved unless include_learned=False.
+    Templates, data generation and eval use only places.json, so their results do not drift.
+    Pending places are not loaded; planner.py uses one only for the question that proposed
+    it."""
+    manual_country = {p["name"]: p.get("country")
+                      for p in json.loads(MANUAL_FILE.read_text())["places"]}
+    places = [
+        Place(p["name"], tuple(p["box"]), p["kind"], p.get("aliases", []), p["source"],
+              country=_country(p, manual_country))
+        for p in json.loads(PLACES_FILE.read_text())["places"]
+    ]
+    if include_learned:
+        places += [Place(r["name"], tuple(r["box"]), r["kind"], [], "learned", "approved")
+                   for r in learned_records().values() if r["status"] == "approved"]
+    return places
+
+
+def _country(entry: dict, manual_country: dict[str, str | None]) -> str | None:
+    """A port's country: hand-made ports from places_manual.json, AIS-located ports from
+    their LOCODE (DKAAL -> DK), ports located from the (Danish) reference list -> DK."""
+    if entry["kind"] != "port":
+        return None
+    if entry["source"] == "manual":
+        return manual_country.get(entry["name"])
+    if entry.get("locode"):
+        return entry["locode"][:2]
+    return "DK" if entry["source"].startswith("reference") else None
+
+
+def _names(place: Place) -> list[str]:
+    return [n for n in {normalise(x) for x in [place.name, *place.aliases]} if n]
+
+
+def find(name: str, places: list[Place] | None = None) -> Place | None:
+    key = normalise(name)
+    for place in places if places is not None else load():
+        if key in _names(place):
+            return place
+    return None
+
+
+def mentioned(text: str, places: list[Place] | None = None) -> list[Place]:
+    """Places named in the text (whole words), longest names first, each place once."""
+    norm = f" {normalise(text)} "
+    found: list[Place] = []
+    pairs = sorted(((n, p) for p in (places if places is not None else load())
+                    for n in _names(p)), key=lambda np: -len(np[0]))
+    for name, place in pairs:
+        if f" {name} " in norm and place not in found:
+            found.append(place)
+            norm = norm.replace(f" {name} ", " ")
+    return found
+
+
+def coord(x: float) -> str:
+    """A box number as the student sees it: 2 decimals when exact (12.40), else 3."""
+    return f"{x:.2f}" if abs(x * 100 - round(x * 100)) < 1e-9 else f"{x:.3f}"
+
+
+def format_place(place: Place) -> str:
+    return f"  {place.name}: " + ", ".join(coord(x) for x in place.box)
+
+
+def with_places(context: str, places: list[Place]) -> str:
+    """The student's prompt with its place list replaced by `places`."""
+    head, sep, _ = context.partition(PLACES_HEADER)
+    if not sep:
+        raise ValueError("context has no place list")
+    lines = [format_place(p) for p in places] or ["  (no named place in this request)"]
+    return head + PLACES_HEADER + "\n" + "\n".join(lines) + "\n"
+
+
+_NUM = r"(-?\d+(?:\.\d+)?)"
+_LON_LAT = re.compile(rf"(?:\w+\.)?lon\s+BETWEEN\s+{_NUM}\s+AND\s+{_NUM}\s+AND\s+"
+                      rf"(?:\w+\.)?lat\s+BETWEEN\s+{_NUM}\s+AND\s+{_NUM}", re.IGNORECASE)
+_LAT_LON = re.compile(rf"(?:\w+\.)?lat\s+BETWEEN\s+{_NUM}\s+AND\s+{_NUM}\s+AND\s+"
+                      rf"(?:\w+\.)?lon\s+BETWEEN\s+{_NUM}\s+AND\s+{_NUM}", re.IGNORECASE)
+
+
+def boxes_in_sql(sql: str) -> list[tuple[float, ...]]:
+    boxes = [(float(a), float(c), float(b), float(d)) for a, b, c, d in _LON_LAT.findall(sql)]
+    boxes += [(float(c), float(a), float(d), float(b)) for a, b, c, d in _LAT_LON.findall(sql)]
+    return boxes
+
+
+def unexplained_boxes(sql: str, places: list[Place], request: str) -> list[tuple[float, ...]]:
+    """Boxes in the SQL that belong neither to a given place nor to numbers in the request."""
+    known = [p.box for p in places]
+    numbers = {round(float(x), 3) for x in re.findall(r"-?\d+\.\d+", request)}
+    out = []
+    for box in boxes_in_sql(sql):
+        if any(all(abs(a - b) < 1e-3 for a, b in zip(box, k, strict=True)) for k in known):
+            continue
+        if all(round(x, 3) in numbers for x in box):
+            continue
+        out.append(box)
+    return out
+
+
+def validate(name: str, kind: str, box: tuple[float, float, float, float]) -> tuple[bool, str]:
+    """Is a proposed place plausible? Inside coverage, sensible size, vessels present."""
+    if normalise(name) in NOT_PLACES:
+        return False, (f"{name} is a country or region, not a place with one box; ask about "
+                       "its ports or sea areas instead")
+    if kind not in MAX_SIDE_DEG:
+        return False, f"kind must be one of {sorted(MAX_SIDE_DEG)}"
+    lon0, lat0, lon1, lat1 = box
+    if not (lon0 < lon1 and lat0 < lat1):
+        return False, "box must be lon_min < lon_max and lat_min < lat_max"
+    c = COVERAGE
+    if lon0 < c[0] or lat0 < c[1] or lon1 > c[2] or lat1 > c[3]:
+        return False, "box is outside the data's coverage (lon -5..32, lat 50..64)"
+    if max(lon1 - lon0, lat1 - lat0) > MAX_SIDE_DEG[kind]:
+        return False, f"box is too large for a {kind} (max {MAX_SIDE_DEG[kind]} degrees a side)"
+    if min(lon1 - lon0, lat1 - lat0) < MIN_SIDE_DEG:
+        return False, "box is too small"
+    if find(name):
+        return False, f"{name} is already known"
+    days = ", ".join(f"DATE '{d}'" for d in _DATES[-VALIDATION_DAYS:])
+    vessels, moored = connect().execute(f"""
+        SELECT count(DISTINCT mmsi), count(DISTINCT mmsi) FILTER (WHERE nav_status = 'Moored')
+        FROM vessel_positions
+        WHERE date IN ({days}) AND lon BETWEEN {lon0} AND {lon1} AND lat BETWEEN {lat0} AND {lat1}
+    """).fetchone()
+    if vessels < MIN_VESSELS:
+        return False, f"only {vessels} vessels in that box on the last {VALIDATION_DAYS} days"
+    if kind == "port" and moored == 0:
+        return False, "no moored vessels in that box, so it does not look like a port"
+    return True, f"{vessels} vessels ({moored} moored) on the last {VALIDATION_DAYS} days"
+
+
+def _append(record: dict) -> None:
+    LEARNED_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with LEARNED_FILE.open("a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def learn(name: str, kind: str, box: tuple[float, float, float, float], evidence: str,
+          context: str) -> Place:
+    """Record a validated proposal as pending (append-only) and return it for this question."""
+    _append({"name": name, "kind": kind, "box": list(box), "status": "pending",
+             "evidence": evidence, "context": context,
+             "at": time.strftime("%Y-%m-%dT%H:%M:%S")})
+    return Place(name, box, kind, [], "learned", "pending")
+
+
+def main() -> None:
+    """Review learned places: list pending ones, approve or reject one by name."""
+    p = argparse.ArgumentParser(description=main.__doc__)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("pending")
+    sub.add_parser("all")
+    for cmd in ("approve", "reject"):
+        sub.add_parser(cmd).add_argument("name")
+    args = p.parse_args()
+    records = learned_records()
+    if args.cmd in ("pending", "all"):
+        for r in records.values():
+            if args.cmd == "all" or r["status"] == "pending":
+                print(f"{r['status']:9} {r['name']:24} {r['kind']:5} {r['box']}  "
+                      f"{r.get('evidence', '')}  | {r.get('context', '')}")
+        return
+    record = records.get(normalise(args.name))
+    if record is None:
+        sys.exit(f"no learned place called {args.name}")
+    _append({**record, "status": "approved" if args.cmd == "approve" else "rejected",
+             "at": time.strftime("%Y-%m-%dT%H:%M:%S")})
+    print(f"{record['name']}: {args.cmd}d")
+
+
+if __name__ == "__main__":
+    main()

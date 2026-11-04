@@ -1,0 +1,9 @@
+# Student fine-tuning (training/): envs/train, built inside the PyTorch container with
+# --system-site-packages so the container's CUDA torch, datasets and flash-attn are reused.
+# Separate from ~/llm_venv (vLLM) and envs/harness.
+transformers
+trl
+peft
+accelerate
+# The container's torchao 0.15 makes peft refuse to load LoRA; peft needs > 0.16 if present.
+torchao>=0.16

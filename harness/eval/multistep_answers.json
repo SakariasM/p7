@@ -1,0 +1,322 @@
+{
+ "day_change_01": {
+  "columns": [
+   "first_day",
+   "second_day",
+   "change"
+  ],
+  "rows": [
+   [
+    92,
+    90,
+    -2
+   ]
+  ]
+ },
+ "day_change_02": {
+  "columns": [
+   "first_day",
+   "second_day",
+   "change"
+  ],
+  "rows": [
+   [
+    296,
+    255,
+    -41
+   ]
+  ]
+ },
+ "day_change_03": {
+  "columns": [
+   "first_day",
+   "second_day",
+   "change"
+  ],
+  "rows": [
+   [
+    320,
+    227,
+    -93
+   ]
+  ]
+ },
+ "day_change_04": {
+  "columns": [
+   "first_day",
+   "second_day",
+   "change"
+  ],
+  "rows": [
+   [
+    216,
+    162,
+    -54
+   ]
+  ]
+ },
+ "day_change_05": {
+  "columns": [
+   "first_day",
+   "second_day",
+   "change"
+  ],
+  "rows": [
+   [
+    93,
+    90,
+    -3
+   ]
+  ]
+ },
+ "compare_places_01": {
+  "columns": [
+   "more_in",
+   "n_first",
+   "n_second"
+  ],
+  "rows": [
+   [
+    "Bremerhaven",
+    4,
+    24
+   ]
+  ]
+ },
+ "compare_places_02": {
+  "columns": [
+   "more_in",
+   "n_first",
+   "n_second"
+  ],
+  "rows": [
+   [
+    "Great Belt",
+    6,
+    79
+   ]
+  ]
+ },
+ "compare_places_03": {
+  "columns": [
+   "more_in",
+   "n_first",
+   "n_second"
+  ],
+  "rows": [
+   [
+    "Kiel Bay",
+    6,
+    69
+   ]
+  ]
+ },
+ "compare_places_04": {
+  "columns": [
+   "more_in",
+   "n_first",
+   "n_second"
+  ],
+  "rows": [
+   [
+    "Kattegat",
+    144,
+    10
+   ]
+  ]
+ },
+ "compare_places_05": {
+  "columns": [
+   "more_in",
+   "n_first",
+   "n_second"
+  ],
+  "rows": [
+   [
+    "Rostock",
+    6,
+    14
+   ]
+  ]
+ },
+ "union_ports_01": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    111
+   ]
+  ]
+ },
+ "union_ports_02": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    86
+   ]
+  ]
+ },
+ "union_ports_03": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    615
+   ]
+  ]
+ },
+ "union_ports_04": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    115
+   ]
+  ]
+ },
+ "union_ports_05": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    167
+   ]
+  ]
+ },
+ "type_share_01": {
+  "columns": [
+   "pct"
+  ],
+  "rows": [
+   [
+    4.819277108433735
+   ]
+  ]
+ },
+ "type_share_02": {
+  "columns": [
+   "pct"
+  ],
+  "rows": [
+   [
+    10.756972111553784
+   ]
+  ]
+ },
+ "type_share_03": {
+  "columns": [
+   "pct"
+  ],
+  "rows": [
+   [
+    32.91139240506329
+   ]
+  ]
+ },
+ "type_share_04": {
+  "columns": [
+   "pct"
+  ],
+  "rows": [
+   [
+    1.075268817204301
+   ]
+  ]
+ },
+ "type_share_05": {
+  "columns": [
+   "pct"
+  ],
+  "rows": [
+   [
+    10.526315789473685
+   ]
+  ]
+ },
+ "daily_average_01": {
+  "columns": [
+   "per_day"
+  ],
+  "rows": [
+   [
+    18.666666666666668
+   ]
+  ]
+ },
+ "daily_average_02": {
+  "columns": [
+   "per_day"
+  ],
+  "rows": [
+   [
+    1.0
+   ]
+  ]
+ },
+ "daily_average_03": {
+  "columns": [
+   "per_day"
+  ],
+  "rows": [
+   [
+    9.0
+   ]
+  ]
+ },
+ "daily_average_04": {
+  "columns": [
+   "per_day"
+  ],
+  "rows": [
+   [
+    169.0
+   ]
+  ]
+ },
+ "daily_average_05": {
+  "columns": [
+   "per_day"
+  ],
+  "rows": [
+   [
+    34.0
+   ]
+  ]
+ },
+ "country_calls_01": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    5
+   ]
+  ]
+ },
+ "country_calls_02": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    1
+   ]
+  ]
+ },
+ "country_calls_03": {
+  "columns": [
+   "vessels"
+  ],
+  "rows": [
+   [
+    3
+   ]
+  ]
+ }
+}
