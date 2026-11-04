@@ -7,7 +7,8 @@ the rows or errors, and the final answer. Needs the llm-serve and llm-student jo
     scripts/ask.sh --mode planner "..."      # always through the planner, for comparison
     scripts/ask.sh --single "..."            # Qwen3-8B alone (agent.py), for comparison
     scripts/ask.sh --baseline "..."          # the same, logged to logs/baseline (not the store's)
-    scripts/ask.sh --student "..."           # the SQL student (sql-v6) alone, not logged
+    scripts/ask.sh --student "..."           # the SQL student (sql-v6) alone, logs/student
+    scripts/ask.sh --base "..."              # the untrained model it came from, logs/base
     scripts/ask.sh --feedback ID wrong "counted ferries too"
     scripts/ask.sh --feedback ID correct
 
@@ -33,8 +34,18 @@ from ais_tool import PROJECT_DIR
 
 # P7_QUESTION_LOG_DIR: somewhere else for tests, so they do not teach the store.
 LOG_DIR = Path(os.environ.get("P7_QUESTION_LOG_DIR", PROJECT_DIR / "logs" / "questions"))
-# --baseline runs: never the store's log; P7_QUESTION_LOG_DIR when set (eval_baseline.py).
-BASELINE_LOG_DIR = Path(os.environ.get("P7_QUESTION_LOG_DIR", PROJECT_DIR / "logs" / "baseline"))
+
+# --baseline, --student and --base runs: never the store's log (it would learn their SQL), but
+# logs/<mode>, or P7_QUESTION_LOG_DIR when set (eval_baseline.py).
+def side_log_dir(mode: str) -> Path:
+    return Path(os.environ.get("P7_QUESTION_LOG_DIR", PROJECT_DIR / "logs" / mode))
+
+
+# --base: the untrained model the student was trained from (qwen2.5-coder-1.5b-instruct), served
+# by vLLM in the student's place on the GPU while it is tested, on its own port and name so
+# nothing else takes it for the student.
+BASE_URL = os.environ.get("P7_BASE_URL", "http://127.0.0.1:8002/v1")
+BASE_MODEL = os.environ.get("P7_BASE_MODEL", "base-coder")
 FEEDBACK_FILE = LOG_DIR / "feedback.jsonl"
 SHOW_ROWS = 10
 LOG_ROWS = 20  # result rows kept per step in the log
@@ -140,9 +151,9 @@ def ask(question: str, mode: str, thinking: bool) -> None:
 
     if mode == "baseline":  # not in the store's log: the store would learn its SQL
         run_id = log_run(question, trace, mode, seconds, "cli", thinking, getpass.getuser(),
-                         llm_usage.summary(llm_calls), BASELINE_LOG_DIR)
+                         llm_usage.summary(llm_calls), side_log_dir(mode))
         print(f"\n(baseline: {llm_usage.summary(llm_calls)['calls']} LLM calls; run id {run_id}"
-              f" in {BASELINE_LOG_DIR})")
+              f" in {side_log_dir(mode)})")
         return
     run_id = log_run(question, trace, mode, seconds, "cli", thinking, getpass.getuser(),
                      llm_usage.summary(llm_calls))
@@ -150,37 +161,49 @@ def ask(question: str, mode: str, thinking: bool) -> None:
           f"\"note\")")
 
 
-def student(question: str) -> None:
-    """The SQL student alone: its prompt as trained (schema and the places the question names),
-    one query, run with query_ais_data's guardrails. None of ask_data's fixes (spelled-out
-    requests, own place names, length caps, value and box checks). Not logged."""
+def student(question: str, mode: str = "student") -> None:
+    """The SQL student alone (mode "base": the untrained model it was trained from): its prompt
+    as trained (schema and the places the question names), one query, run with query_ais_data's
+    guardrails. None of ask_data's fixes (spelled-out requests, own place names, length caps,
+    value and box checks). Logged to logs/<mode>, not the store's log."""
     import places
     from ais_tool import extract_sql, query_ais_data
     from openai import APIConnectionError
     from planner import SCHEMA_CONTEXT, STUDENT_MODEL, student_base_url
 
+    base_url, model = (BASE_URL, BASE_MODEL) if mode == "base" else (student_base_url(),
+                                                                     STUDENT_MODEL)
     named = places.mentioned(question, places.load())
     start = time.time()
     try:
         with llm_usage.track() as llm_calls:
-            response = llm_usage.client(student_base_url()).chat.completions.create(
-                model=STUDENT_MODEL,
+            response = llm_usage.client(base_url).chat.completions.create(
+                model=model,
                 messages=[{"role": "system", "content": places.with_places(SCHEMA_CONTEXT, named)},
                           {"role": "user", "content": question}],
                 temperature=0,
                 max_tokens=512,
             )
     except APIConnectionError:
-        sys.exit("The student server is not reachable (llm-student job or p7-student).")
+        sys.exit(f"No model server at {base_url}" + (" (p7-base, started for testing)"
+                                                     if mode == "base" else ""))
     sql = extract_sql(response.choices[0].message.content)
     result = query_ais_data(sql)
+    seconds = round(time.time() - start, 1)
     print("\n=== Question\n" + question)
     if named:
-        print(f"\n    places in the student's prompt: {', '.join(p.name for p in named)}")
+        print(f"\n    places in the prompt: {', '.join(p.name for p in named)}")
     print("    SQL:\n      " + sql.strip().replace("\n", "\n      "))
     print("    " + show_rows(result).replace("\n", "\n    "))
-    print(f"\n(student alone: {llm_usage.summary(llm_calls)['calls']} LLM call, "
-          f"{round(time.time() - start, 1)} s; not logged)")
+    # as planner.py's direct route: the result as the answer, so eval_baseline.py can score it
+    answer = (f"Error: {result['error']}" if "error" in result else
+              f"Result ({', '.join(map(str, result['columns']))}): {result['rows'][:20]}")
+    trace = {"answer": answer, "tool_calls": [{"request": question, "sql": sql, "result": result,
+                                               "places": [p.name for p in named]}]}
+    llm = {**llm_usage.summary(llm_calls), "student_calls": 1, "planner_calls": 0}
+    run_id = log_run(question, trace, mode, seconds, "cli", False, getpass.getuser(), llm,
+                     side_log_dir(mode))
+    print(f"\n({mode} alone: 1 LLM call, {seconds} s; run id {run_id} in {side_log_dir(mode)})")
 
 
 def feedback(run_id: str, verdict: str, note: str) -> None:
@@ -201,7 +224,11 @@ def main() -> None:
     p.add_argument("--baseline", action="store_true",
                    help="the LLM alone with the data tool, as --single, logged to logs/baseline")
     p.add_argument("--student", action="store_true",
-                   help="the SQL student alone: one query, no harness fixes, not logged")
+                   help="the SQL student alone: one query, no harness fixes, logged to "
+                        "logs/student")
+    p.add_argument("--base", action="store_true",
+                   help="as --student with the untrained model it was trained from (p7-base, "
+                        "port 8002), logged to logs/base")
     p.add_argument("--thinking", action="store_true", help="let Qwen3-8B reason (slower)")
     p.add_argument("--feedback", nargs="+", metavar=("ID", "VERDICT"),
                    help="mark a run: ID correct|wrong [note]")
@@ -214,8 +241,8 @@ def main() -> None:
     if not args.question:
         p.error("give a question")
     os.environ.setdefault("PYTHONWARNINGS", "ignore")
-    if args.student:
-        student(" ".join(args.question))
+    if args.student or args.base:
+        student(" ".join(args.question), "base" if args.base else "student")
         return
     mode = "baseline" if args.baseline else "single" if args.single else args.mode
     ask(" ".join(args.question), mode, args.thinking)
