@@ -38,12 +38,20 @@ if _DATES and not USE_CLEAN:
     print(f"ais_tool: {len(set(_DATES) - _CLEAN_DATES)} days not cleaned yet, vessel_positions "
           "uses the raw data with on-the-fly filters", file=sys.stderr)
 
+# Platforms, rigs, fixed installations and test transmitters with ship MMSIs (not_ships.json,
+# reviewed by hand) are left out of vessel_positions and vessel_days; the ais view keeps them.
+# An empty list is "0", no MMSI (NOT IN (NULL) would leave out every row).
+_NOT_SHIPS = ", ".join(str(s["mmsi"]) for s in json.loads(
+    Path(__file__).with_name("not_ships.json").read_text())["not_ships"]) or "0"
+
 _VESSEL_POSITIONS = (
-    f"SELECT * FROM read_parquet('{CLEAN_GLOB}', hive_partitioning=1)" if USE_CLEAN else
-    """SELECT * REPLACE (CASE WHEN sog >= 102.2 THEN NULL ELSE sog END AS sog) FROM ais
+    f"SELECT * FROM read_parquet('{CLEAN_GLOB}', hive_partitioning=1)\n"
+    f"  WHERE mmsi NOT IN ({_NOT_SHIPS})" if USE_CLEAN else
+    f"""SELECT * REPLACE (CASE WHEN sog >= 102.2 THEN NULL ELSE sog END AS sog) FROM ais
   WHERE mobile_type IN ('Class A', 'Class B')
     AND mmsi BETWEEN 200000000 AND 799999999
-    AND lat BETWEEN 50 AND 64 AND lon BETWEEN -5 AND 32"""
+    AND lat BETWEEN 50 AND 64 AND lon BETWEEN -5 AND 32
+    AND mmsi NOT IN ({_NOT_SHIPS})"""
 )
 
 # One row per vessel per day (build_vessel_days.py), for long periods and whole-data totals.
@@ -64,9 +72,11 @@ if HAVE_VESSEL_DAYS and VESSEL_STATIC_FILE.exists():
         "CREATE VIEW vessel_days AS SELECT d.* REPLACE (coalesce(d.name, s.name) AS name, "
         "coalesce(d.ship_type, s.ship_type) AS ship_type, coalesce(d.imo, s.imo) AS imo, "
         "coalesce(d.length, s.length) AS length, coalesce(d.width, s.width) AS width) "
-        f"FROM {_VESSEL_DAYS} d LEFT JOIN read_parquet('{VESSEL_STATIC_FILE}') s USING (mmsi);")
+        f"FROM {_VESSEL_DAYS} d LEFT JOIN read_parquet('{VESSEL_STATIC_FILE}') s USING (mmsi) "
+        f"WHERE d.mmsi NOT IN ({_NOT_SHIPS});")
 elif HAVE_VESSEL_DAYS:
-    _VESSEL_DAYS_VIEW = f"CREATE VIEW vessel_days AS SELECT * FROM {_VESSEL_DAYS};"
+    _VESSEL_DAYS_VIEW = (f"CREATE VIEW vessel_days AS SELECT * FROM {_VESSEL_DAYS} "
+                         f"WHERE mmsi NOT IN ({_NOT_SHIPS});")
 else:
     _VESSEL_DAYS_VIEW = ""
 
