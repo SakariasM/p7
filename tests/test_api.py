@@ -147,7 +147,58 @@ def test_ui_page_is_served_but_not_in_the_contract(client: TestClient) -> None:
     r = client.get("/")
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
+    assert 'src="/ui-assets/main.js"' in r.text
+    assert client.get("/ui-assets/styles.css").status_code == 200
+    assert client.get("/ui-assets/area-selection.js").status_code == 200
     assert "/" not in client.get("/openapi.json").json()["paths"]
+
+
+def test_ask_forwards_exact_selected_area(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    captured: dict = {}
+
+    class HarnessResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self) -> bytes:
+            return b'{"answer":"42","tool_calls":[]}'
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["payload"] = json.loads(request.data)
+        captured["timeout"] = timeout
+        return HarnessResponse()
+
+    monkeypatch.setattr("ais.api.urllib.request.urlopen", fake_urlopen)
+    area = {"west": 10.123456, "south": 55.1, "east": 10.9, "north": 55.8}
+    response = client.post("/ask", json={"question": "How many ships?", "selected_area": area})
+
+    assert response.status_code == 200
+    assert captured["payload"] == {
+        "question": "How many ships?",
+        "map": True,
+        "selected_area": area,
+    }
+
+
+@pytest.mark.parametrize(
+    "area",
+    [
+        {"west": 11, "south": 55, "east": 10, "north": 56},
+        {"west": 10, "south": 57, "east": 11, "north": 56},
+        {"west": -181, "south": 55, "east": 11, "north": 56},
+    ],
+)
+def test_ask_rejects_invalid_selected_area(client: TestClient, area: dict[str, float]) -> None:
+    response = client.post("/ask", json={"question": "How many ships?", "selected_area": area})
+    assert response.status_code == 422
 
 
 def test_ask_and_feedback_without_harness(
