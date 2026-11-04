@@ -444,6 +444,28 @@ def run_student_only(question: str, return_trace: bool = False, **_):
     return answer
 
 
+def run_port_calls(arguments: dict) -> tuple[dict, dict]:
+    """(step, reply): functions.port_calls for the planner's arguments, and the step as it is
+    logged: a data step whose rows are the vessel count, so the evals can score it. Also used
+    by the learned-question store to replay a learned port_calls question."""
+    ship_type = arguments.get("ship_type") or None
+    if str(ship_type).lower() in ("all", "any", "none"):
+        ship_type = None  # the planner's way of saying "every ship type"
+    reply = functions.port_calls(
+        str(arguments.get("country", "")), str(arguments.get("date_from", "")),
+        str(arguments.get("date_to", "")), ship_type,
+        arguments.get("min_length_m"), valid_ship_types=VALID_VALUES["ship_type"],
+        area=arguments.get("area") or None)
+    print(f"[port_calls] {arguments} -> {reply.get('vessels', reply.get('error'))}",
+          file=sys.stderr)
+    result = ({"error": reply["error"]} if "error" in reply else
+              {"columns": ["vessels"], "rows": [[reply["vessels"]]], "row_count": 1,
+               "elapsed_seconds": reply["seconds"]})
+    step = {"request": f"port_calls({json.dumps(arguments)})", "places": [],
+            "sql": "(port_calls)", "result": result}
+    return step, reply
+
+
 def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
         return_trace: bool = False, sql_writer: str = "student"):
     """sql_writer="8b" lets the 8B write the SQL for its own requests instead of the student
@@ -499,22 +521,8 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
             except json.JSONDecodeError:
                 arguments = {}
             if tool_call.function.name == "port_calls":
-                ship_type = arguments.get("ship_type") or None
-                if str(ship_type).lower() in ("all", "any", "none"):
-                    ship_type = None  # the planner's way of saying "every ship type"
-                reply = functions.port_calls(
-                    str(arguments.get("country", "")), str(arguments.get("date_from", "")),
-                    str(arguments.get("date_to", "")), ship_type,
-                    arguments.get("min_length_m"), valid_ship_types=VALID_VALUES["ship_type"],
-                    area=arguments.get("area") or None)
-                print(f"[port_calls] {arguments} -> {reply.get('vessels', reply.get('error'))}",
-                      file=sys.stderr)
-                # Logged as a data step (rows = the vessel count) so the evals can score it.
-                result = ({"error": reply["error"]} if "error" in reply else
-                          {"columns": ["vessels"], "rows": [[reply["vessels"]]], "row_count": 1,
-                           "elapsed_seconds": reply["seconds"]})
-                steps.append({"request": f"port_calls({json.dumps(arguments)})", "places": [],
-                              "sql": "(port_calls)", "result": result})
+                step, reply = run_port_calls(arguments)
+                steps.append(step)
                 messages.append({"role": "tool", "tool_call_id": tool_call.id,
                                  "content": json.dumps(reply, default=str)})
                 continue
@@ -1004,14 +1012,22 @@ def _run_learned(planner: OpenAI, question: str, map_view: bool) -> tuple[dict |
     if hit and hit["similar"] and not same_question(planner, hit["alias"], hit["matched"]):
         hit = None
     if hit:
-        result = with_total(hit["sql"], with_names(query_ais_data(hit["sql"])))
-        if "error" not in result and result.get("rows"):
+        if hit["kind"] == "port_calls":  # the tool call the planner made, with the new values
+            step, reply = run_port_calls(hit["args"])
+            result = step["result"]
+            # The 8B words it from the whole reply (ports and counts), as on the planner route.
+            wording = {**step, "sql": step["request"], "result": {
+                "columns": ["port_calls reply"], "rows": [[json.dumps(reply, default=str)]]}}
+        else:
+            result = with_total(hit["sql"], with_names(query_ais_data(hit["sql"])))
             step = {"request": question, "places": hit["places"], "sql": hit["sql"],
                     "result": result}
+            wording = step
+        if "error" not in result and result.get("rows"):
             answer = query_store.render_answer(hit, result)
             similar = (f", similar to \"{hit['matched']}\" ({hit['similarity']})"
                        if hit["similar"] else "")
-            trace = {"answer": answer or phrase(planner, question, step, map_view),
+            trace = {"answer": answer or phrase(planner, question, wording, map_view),
                      "plan": None, "tool_calls": [step], "place_calls": [],
                      "route": ("learned~" if hit["similar"] else "learned")
                               + ("" if answer else "+wording"),

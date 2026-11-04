@@ -114,7 +114,9 @@ def describe(hints: dict) -> str:
             "name a vessel, place or time to show it. Heatmaps and charts are not supported yet.")
 
 
-def map_hints(question: str, trace: dict) -> dict:
+def map_hints(
+    question: str, trace: dict, selected_area: list[float] | None = None
+) -> dict:
     read = trace.get("question_as_read") or question
     calls = trace.get("tool_calls") or []
     sqls = [c.get("sql") or "" for c in calls if "error" not in (c.get("result") or {})]
@@ -161,7 +163,8 @@ def map_hints(question: str, trace: dict) -> dict:
     hints = {
         "vessels": vessels,
         "vessel_query": query,
-        "places": [{"name": p.name, "box": list(p.box)} for p in named.values()],
+        "places": ([{"name": "Selected area", "box": selected_area}] if selected_area else [])
+        + [{"name": p.name, "box": list(p.box)} for p in named.values()],
         "start": start.isoformat() if start else None,
         "end": end.isoformat() if end else None,
         "at": at.isoformat() if at else None,

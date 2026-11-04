@@ -10,7 +10,8 @@ from typing import Annotated
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Path, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import ValidationError
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from ais.models import (
     BBox,
@@ -37,13 +38,34 @@ MAX_STOPS_ITEMS = 5000
 MAX_ROUTE_LEGS = 2000
 
 BBOX_DOC = "min_lon,min_lat,max_lon,max_lat (WGS84), e.g. 7.5,54.5,15.5,58"
-UI_PAGE = FilePath(__file__).parent / "ui" / "index.html"
+UI_DIR = FilePath(__file__).parent / "ui"
+UI_PAGE = UI_DIR / "index.html"
 # The question box on the map forwards to the agent harness (harness/api.py, its own process
 # and Python environment). Not part of the API contract (api/openapi.json).
 HARNESS_URL = os.environ.get("HARNESS_URL", "http://127.0.0.1:8110")
 ASK_TIMEOUT_S = 300
 MMSI = Annotated[int, Path(ge=200_000_000, le=799_999_999)]
 MMSIQuery = Annotated[int, Query(ge=200_000_000, le=799_999_999)]
+
+
+class SelectedArea(BaseModel):
+    """A rectangle drawn on the map, in WGS84 longitude/latitude coordinates."""
+
+    west: float = Field(ge=-180, le=180)
+    south: float = Field(ge=-90, le=90)
+    east: float = Field(ge=-180, le=180)
+    north: float = Field(ge=-90, le=90)
+
+    @model_validator(mode="after")
+    def ordered_bounds(self) -> "SelectedArea":
+        if self.west >= self.east or self.south >= self.north:
+            raise ValueError("area must have west < east and south < north")
+        return self
+
+
+class AgentQuestion(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    selected_area: SelectedArea | None = None
 
 
 def to_utc_naive(dt: datetime) -> datetime:
@@ -89,6 +111,7 @@ def create_app(store: AisStore | None) -> FastAPI:
         "All timestamps are UTC; naive timestamps are interpreted as UTC.",
     )
     app.state.store = store
+    app.mount("/ui-assets", StaticFiles(directory=UI_DIR), name="ui-assets")
 
     @app.exception_handler(DerivedDataMissing)
     def _derived_missing(_: Request, e: DerivedDataMissing) -> JSONResponse:
@@ -122,11 +145,14 @@ def create_app(store: AisStore | None) -> FastAPI:
             )
 
     @app.post("/ask", include_in_schema=False)
-    def ask(body: Annotated[dict[str, object], Body()]) -> JSONResponse:
+    def ask(body: AgentQuestion) -> JSONResponse:
         """Forward a question from the map page to the agent harness (with "map": true).
         A plain def: FastAPI runs it in a worker thread, so a slow answer does not hold up
         the map's other requests."""
-        return forward("/ask", {"question": str(body.get("question", "")), "map": True})
+        payload: dict[str, object] = {"question": body.question, "map": True}
+        if body.selected_area is not None:
+            payload["selected_area"] = body.selected_area.model_dump()
+        return forward("/ask", payload)
 
     @app.post("/feedback", include_in_schema=False)
     def feedback(body: Annotated[dict[str, object], Body()]) -> JSONResponse:

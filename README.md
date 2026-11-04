@@ -147,8 +147,11 @@ grep -l FAILED /ceph/project/P7-Agent-Harness/logs/ais_clean_<job id>_*.out   # 
 
 ## API
 
-`ais serve` also serves a prototype map page at `/` (`src/ais/ui/index.html`, plain HTML and
-Leaflet, no build step). It only calls the endpoints below and is not part of the contract.
+`ais serve` also serves AIS Explorer at `/`. Its browser code lives in `src/ais/ui/` as
+plain HTML, CSS and JavaScript modules, with Leaflet for the map and no build step. A user
+can draw an exact rectangle and attach its WGS84 bounds to an agent question. The harness
+receives those bounds as structured data and asks about every position inside the box.
+The page only calls the endpoints below and is not part of the public API contract.
 
 The contract is [`api/openapi.json`](api/openapi.json). Generate frontend types with:
 
@@ -180,7 +183,14 @@ src/ais/
   store/base.py    AisStore Protocol (DuckDB now, Postgres/PostGIS later)
   store/duckdb_store.py
   api.py           FastAPI app, server-side limits
-  ui/index.html    prototype map page served at /
+  ui/index.html    AIS Explorer page structure, served at /
+  ui/styles.css    visual design and responsive layout
+  ui/main.js       frontend entry point
+  ui/map-explorer.js      map, vessel snapshots, search, routes and playback
+  ui/area-selection.js    exact rectangle drawing and corner coordinates
+  ui/agent-assistant.js   questions, answers, map hints and feedback
+  ui/api-client.js        browser HTTP requests and errors
+  ui/shared.js            shared constants, formatting and DOM helpers
   cli.py           `uv run ais --help`
 data/              raw/ -> clean/ -> derived/ (git-ignored, see data/README.md)
 api/openapi.json   committed contract; CI fails if it is stale
