@@ -531,28 +531,87 @@ def _vessel_slots(alias: str, values: dict, sql: str) -> str:
     return alias
 
 
+_PORT_CALLS_RE = re.compile(r"^port_calls\((\{.*\})\)$", re.DOTALL)
+_TOOL_SLOTS = {"date_from": "date", "date_to": "date", "area": "place", "ship_type": "type",
+               "min_length_m": "num"}
+
+
+def tool_skeleton(args: dict, values: dict[str, object]) -> tuple[str | None, str]:
+    """(skeleton, "") for a port_calls call: its arguments as JSON with the question's values
+    as slots ({date1}, {place1}, {type1}, {num1}); or (None, why not). Every slot must be an
+    argument, and the dates and the area must come from the question."""
+    args = {k: v for k, v in args.items() if v not in (None, "")}
+    if str(args.get("ship_type", "")).lower() in ("all", "any", "none"):
+        del args["ship_type"]  # every ship type, as planner.run_port_calls reads it
+    out, used = {}, set()
+    for key, value in args.items():
+        kind = _TOOL_SLOTS.get(key)
+        if kind == "place" and _place(str(value)):
+            value = _place(str(value)).name  # "Bornholm" is Bornholm waters, as in the question
+        slot = next((name for name, v in values.items() if kind and name.startswith(kind) and (
+            v.isoformat() == value if isinstance(v, date) else
+            float(v) == float(value) if kind == "num" else str(v) == str(value))), None)
+        if slot:
+            out[key] = f"{{{slot}}}"
+            used.add(slot)
+        elif kind in ("date", "place"):
+            return None, f"{key} {value!r} is not in the question"
+        else:
+            out[key] = value
+    unused = sorted(set(values) - used)
+    if unused:
+        return None, f"{unused[0]} not an argument"
+    return json.dumps(out, sort_keys=True, ensure_ascii=False), ""
+
+
+def render_args(skeleton: str, values: dict[str, object]) -> dict:
+    """The port_calls arguments for these slot values (a limit back as a number)."""
+    args = json.loads(render_sql(skeleton, values))
+    if "min_length_m" in args:
+        args["min_length_m"] = float(args["min_length_m"])
+    return args
+
+
 def candidate(run: dict) -> tuple[dict | None, str]:
-    """(pattern part from one logged run, "") or (None, why the run gives no pattern)."""
+    """(pattern part from one logged run, "") or (None, why the run gives no pattern). Failed
+    steps are left out: a planner run that got there after a failed attempt counts too."""
     if run.get("error") or not run.get("answer"):
         return None, "no answer"
-    steps = run.get("steps") or []
-    if len(steps) != 1 or not steps[0].get("sql") or steps[0]["sql"] == "(port_calls)":
-        return None, "not one SQL query"
-    if steps[0].get("error"):
-        return None, "the query failed"
+    steps = [s for s in run.get("steps") or [] if s.get("sql") and not s.get("error")]
+    if len(steps) != 1:
+        return None, "not one successful query"
     question = run.get("question_as_read") or run["question"]
     alias, values, words = question_skeleton(question)
-    sql = steps[0]["sql"]
-    alias = _vessel_slots(alias, values, sql)
-    skeleton, why = sql_skeleton(sql, values)
-    if skeleton is None:
-        return None, why
-    if canonical(render_sql(skeleton, values)) != canonical(sql):
-        return None, "the SQL does not come back with the original values"
-    return {"id": pattern_id(skeleton), "sql": skeleton, "alias": alias, "values": values,
-            "words": words, "template": answer_template(
-                run["answer"], question, values, words, steps[0].get("rows"),
-                steps[0].get("row_count"))}, ""
+    step = steps[0]
+    if step["sql"] == "(port_calls)":
+        m = _PORT_CALLS_RE.match(step.get("request") or "")
+        if not m:
+            return None, "port_calls without its arguments"
+        args = json.loads(m.group(1))
+        skeleton, why = tool_skeleton(args, values)
+        if skeleton is None:
+            return None, why
+        plain = {k: v for k, v in args.items() if v not in (None, "")
+                 and not (k == "ship_type" and str(v).lower() in ("all", "any", "none"))}
+        if "area" in plain and _place(str(plain["area"])):
+            plain["area"] = _place(str(plain["area"])).name
+        if "min_length_m" in plain:
+            plain["min_length_m"] = float(plain["min_length_m"])
+        if render_args(skeleton, values) != plain:
+            return None, "the arguments do not come back with the original values"
+        kind = "port_calls"
+    else:
+        alias = _vessel_slots(alias, values, step["sql"])
+        skeleton, why = sql_skeleton(step["sql"], values)
+        if skeleton is None:
+            return None, why
+        if canonical(render_sql(skeleton, values)) != canonical(step["sql"]):
+            return None, "the SQL does not come back with the original values"
+        kind = "sql"
+    return {"id": pattern_id(skeleton), "kind": kind, "sql": skeleton, "alias": alias,
+            "values": values, "words": words, "template": answer_template(
+                run["answer"], question, values, words, step.get("rows"),
+                step.get("row_count"))}, ""
 
 
 def _score(correct: int, wrong: int) -> float:
@@ -588,7 +647,8 @@ def distill(log_dir: Path = LOG_DIR, feedback_file: Path = FEEDBACK_FILE,
             refused[why] = refused.get(why, 0) + 1
             continue
         p = patterns.setdefault(part["id"], {
-            "id": part["id"], "sql": part["sql"], "slots": sorted(part["values"]),
+            "id": part["id"], "kind": part["kind"], "sql": part["sql"],
+            "slots": sorted(part["values"]),
             "aliases": [], "templates": {}, "examples": [], "runs": [], "verdicts": []})
         if part["alias"] not in p["aliases"]:
             p["aliases"].append(part["alias"])
@@ -612,7 +672,12 @@ def distill(log_dir: Path = LOG_DIR, feedback_file: Path = FEEDBACK_FILE,
         elif check:
             values = {k: (date.fromisoformat(v) if k.startswith("date") else v)
                       for k, v in p["examples"][0]["values"].items()}
-            result = query_ais_data(render_sql(p["sql"], other_values(values)))
+            if p.get("kind") == "port_calls":  # other dates; the area keeps its ports
+                other = {**other_values(values),
+                         **{k: v for k, v in values.items() if k.startswith("place")}}
+                result = planner.run_port_calls(render_args(p["sql"], other))[1]
+            else:
+                result = query_ais_data(render_sql(p["sql"], other_values(values)))
             p["runs_with_other_values"] = "error" not in result
         p["status"], p["status_by"] = _status(p, reviews.get(p["id"]))
     store = {"built": time.strftime("%Y-%m-%dT%H:%M:%S"), "runs": len(runs),
@@ -808,9 +873,12 @@ def match(question: str, similar: bool = True) -> dict | None:
     if not hits:
         return None
     p = max(hits, key=lambda p: (p["score"], len(p["runs"])))
-    return {"pattern": p["id"], "alias": alias, "matched": matched, "similarity": similarity,
-            "similar": via == "similar", "values": values, "words": words,
-            "sql": render_sql(p["sql"], values), "template": p["templates"].get(matched),
+    kind = p.get("kind", "sql")
+    return {"pattern": p["id"], "kind": kind, "alias": alias, "matched": matched,
+            "similarity": similarity, "similar": via == "similar", "values": values,
+            "words": words, "sql": render_sql(p["sql"], values),
+            "args": render_args(p["sql"], values) if kind == "port_calls" else None,
+            "template": p["templates"].get(matched),
             "places": [str(v) for k, v in values.items() if k.startswith("place")]}
 
 
