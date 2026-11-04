@@ -17,6 +17,7 @@ from collections.abc import Iterable
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -38,6 +39,16 @@ ASK = PROJECT / "scripts" / "ask.sh"
 
 sys.path.insert(0, str(HERE))
 from eval_sql import answer_has_reference, results_match
+
+CANNOT_RE = re.compile(
+    r"\b(?:not (?:in|included|include|contain|available|supported)|"
+    r"does not (?:include|contain|have)|cannot|can't|only answer|no information)\b",
+    re.IGNORECASE,
+)
+CLARIFY_RE = re.compile(
+    r"\b(specify|provide|clarify|which|unknown|not (?:properly )?defined)\b",
+    re.IGNORECASE,
+)
 
 
 def sha256(path: Path) -> str:
@@ -92,16 +103,18 @@ def score_record(record: dict, expected: dict, question: str) -> dict:
         "data_match": data_match,
         "answer_match": answer_match,
         "validation": "accepted" if successful else "rejected",
+        "validation_correct": bool(successful),
         "tool_calls": len(steps),
         "llm_calls": (record.get("llm") or {}).get("calls", 0),
         "latency_seconds": record.get("seconds"),
     }
 
 
-def run_question(question: str, expected: dict | None, env: dict) -> dict:
+def run_question(question: dict, expected: dict | None, env: dict) -> dict:
+    text = question["question"]
     started = time.monotonic()
     completed = subprocess.run(
-        [str(ASK), "--single", question],
+        [str(ASK), "--single", text],
         cwd=PROJECT,
         env=env,
         capture_output=True,
@@ -111,15 +124,31 @@ def run_question(question: str, expected: dict | None, env: dict) -> dict:
     elapsed = round(time.monotonic() - started, 3)
     record = latest_log(Path(env["P7_QUESTION_LOG_DIR"]))
     result = {
-        "question": question,
+        "question": text,
         "exit_code": completed.returncode,
         "latency_seconds": elapsed,
         "stdout": completed.stdout,
         "stderr": completed.stderr,
         "log": record,
     }
-    if expected is not None and record is not None:
-        result["score"] = score_record(record, expected, question)
+    if question.get("expect") in {"reply", "clarify"} and record is not None:
+        answer = record.get("answer") or ""
+        if question["expect"] == "reply":
+            correct = bool(record.get("route") == "reply" or CANNOT_RE.search(answer))
+        else:
+            correct = bool(CLARIFY_RE.search(answer))
+        result["score"] = {
+            "answer_correct": correct,
+            "data_match": False,
+            "answer_match": correct,
+            "validation": "not_applicable" if not record.get("steps") else "unexpected_tool_call",
+            "validation_correct": not record.get("steps"),
+            "tool_calls": len(record.get("steps", [])),
+            "llm_calls": (record.get("llm") or {}).get("calls", 0),
+            "latency_seconds": record.get("seconds"),
+        }
+    elif expected is not None and record is not None:
+        result["score"] = score_record(record, expected, text)
     else:
         steps = (record or {}).get("steps", [])
         successful = [step for step in steps if not step.get("error")]
@@ -128,6 +157,7 @@ def run_question(question: str, expected: dict | None, env: dict) -> dict:
         "data_match": False,
         "answer_match": False,
         "validation": "rejected" if not successful else "accepted",
+        "validation_correct": False,
         "tool_calls": len(steps),
         "llm_calls": ((record or {}).get("llm") or {}).get("calls", 0),
         }
@@ -143,14 +173,11 @@ def summarize(records: list[dict], question_count: int) -> dict:
     valid_scores = [r["score"] for r in valid]
     return {
         "questions": question_count,
-        "answer_accuracy": mean([s["answer_correct"] for s in valid_scores]),
-        "validation_effectiveness_valid": mean(
-            [s["validation"] == "accepted" and s["answer_correct"] for s in valid_scores]
-        ),
+        "response_accuracy": mean([s["answer_correct"] for s in valid_scores]),
+        "validation_efficacy": mean([s["validation_correct"] for s in valid_scores]),
         "full_llm_calls_per_request": mean([s["llm_calls"] for s in valid_scores]),
+        "reuse_rate": None,
         "end_to_end_latency_seconds": mean([r["latency_seconds"] for r in valid]),
-        "safe_reuse_rate": None,
-        "safe_reuse_rate_status": "not_applicable_baseline_single",
     }
 
 
@@ -183,8 +210,7 @@ def main() -> None:
         "answers_sha256": {str(path): sha256(path) for path in answer_files},
         "runs": args.runs,
         "mode": "scripts/ask.sh --single",
-        "safe_reuse_rate": None,
-        "safe_reuse_rate_status": "not_applicable_baseline_single",
+        "reuse_rate": None,
     }
     (args.out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
@@ -193,16 +219,17 @@ def main() -> None:
         run_dir = args.out / f"run-{run_number:02d}"
         run_dir.mkdir(exist_ok=True)
         records = []
-        for question in questions:
+        evaluated_questions = [q for q in questions if q.get("expect") != "skip"]
+        for question in evaluated_questions:
             with tempfile.TemporaryDirectory(prefix="baseline-question-") as log_dir:
                 env = os.environ.copy()
                 env.setdefault("P7_PROJECT_DIR", str(PROJECT))
                 env["P7_QUESTION_LOG_DIR"] = log_dir
-                result = run_question(question["question"], answers.get(question["id"]), env)
+                result = run_question(question, answers.get(question["id"]), env)
             result.update({"id": question["id"], "kind": "valid", "run": run_number})
             records.append(result)
         (run_dir / "records.json").write_text(json.dumps(records, indent=2, default=str) + "\n")
-        summary = summarize(records, len(questions))
+        summary = summarize(records, len(evaluated_questions))
         (run_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
         summaries.append(summary)
         print(f"run {run_number}/{args.runs}: {json.dumps(summary, sort_keys=True)}", flush=True)
@@ -212,7 +239,7 @@ def main() -> None:
         for key in summaries[0]
         if key != "questions"
     }
-    aggregate.update({"runs": args.runs, "questions": len(questions)})
+    aggregate.update({"runs": args.runs, "questions": summaries[0]["questions"]})
     (args.out / "summary.json").write_text(json.dumps(aggregate, indent=2) + "\n")
     print(json.dumps(aggregate, indent=2))
 
