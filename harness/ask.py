@@ -6,7 +6,7 @@ the rows or errors, and the final answer. Needs the llm-serve and llm-student jo
     scripts/ask.sh "How many cruise ships visited Denmark in August?"
     scripts/ask.sh --mode planner "..."      # always through the planner, for comparison
     scripts/ask.sh --single "..."            # Qwen3-8B alone (agent.py), for comparison
-    scripts/ask.sh --baseline "..."          # the same LLM alone with the data, not logged
+    scripts/ask.sh --baseline "..."          # the same, logged to logs/baseline (not the store's)
     scripts/ask.sh --student "..."           # the SQL student (sql-v6) alone, not logged
     scripts/ask.sh --feedback ID wrong "counted ferries too"
     scripts/ask.sh --feedback ID correct
@@ -33,6 +33,8 @@ from ais_tool import PROJECT_DIR
 
 # P7_QUESTION_LOG_DIR: somewhere else for tests, so they do not teach the store.
 LOG_DIR = Path(os.environ.get("P7_QUESTION_LOG_DIR", PROJECT_DIR / "logs" / "questions"))
+# --baseline runs: never the store's log; P7_QUESTION_LOG_DIR when set (eval_baseline.py).
+BASELINE_LOG_DIR = Path(os.environ.get("P7_QUESTION_LOG_DIR", PROJECT_DIR / "logs" / "baseline"))
 FEEDBACK_FILE = LOG_DIR / "feedback.jsonl"
 SHOW_ROWS = 10
 LOG_ROWS = 20  # result rows kept per step in the log
@@ -56,11 +58,12 @@ def _store_snapshot() -> dict | None:
 
 
 def log_run(question: str, trace: dict, mode: str, seconds: float, source: str,
-            thinking: bool = False, user: str | None = None, llm: dict | None = None) -> str:
+            thinking: bool = False, user: str | None = None, llm: dict | None = None,
+            log_dir: Path = LOG_DIR) -> str:
     """Append one answered (or failed) question to today's log, with its LLM calls (llm_usage
     summary) and the store's size; returns its run id."""
     run_id = time.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(3)
-    append(LOG_DIR / f"{time.strftime('%Y-%m-%d')}.jsonl", {
+    append(log_dir / f"{time.strftime('%Y-%m-%d')}.jsonl", {
         "id": run_id, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "source": source,
         "user": user, "mode": mode, "route": trace.get("route"),
         "route_reason": trace.get("route_reason"), "thinking": thinking,
@@ -135,8 +138,11 @@ def ask(question: str, mode: str, thinking: bool) -> None:
         print("    " + show_rows(step["result"]).replace("\n", "\n    "))
     print(f"\n=== Answer ({seconds} s)\n{trace['answer']}")
 
-    if mode == "baseline":  # not logged: the learned-question store would learn its SQL
-        print(f"\n(baseline: {llm_usage.summary(llm_calls)['calls']} LLM calls; not logged)")
+    if mode == "baseline":  # not in the store's log: the store would learn its SQL
+        run_id = log_run(question, trace, mode, seconds, "cli", thinking, getpass.getuser(),
+                         llm_usage.summary(llm_calls), BASELINE_LOG_DIR)
+        print(f"\n(baseline: {llm_usage.summary(llm_calls)['calls']} LLM calls; run id {run_id}"
+              f" in {BASELINE_LOG_DIR})")
         return
     run_id = log_run(question, trace, mode, seconds, "cli", thinking, getpass.getuser(),
                      llm_usage.summary(llm_calls))
@@ -193,7 +199,7 @@ def main() -> None:
                         "the planner; planner: always the planner; single: Qwen3-8B alone")
     p.add_argument("--single", action="store_true", help="same as --mode single")
     p.add_argument("--baseline", action="store_true",
-                   help="the LLM alone with the data tool, as --single, but not logged")
+                   help="the LLM alone with the data tool, as --single, logged to logs/baseline")
     p.add_argument("--student", action="store_true",
                    help="the SQL student alone: one query, no harness fixes, not logged")
     p.add_argument("--thinking", action="store_true", help="let Qwen3-8B reason (slower)")
