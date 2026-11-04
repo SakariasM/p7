@@ -6,6 +6,8 @@ the rows or errors, and the final answer. Needs the llm-serve and llm-student jo
     scripts/ask.sh "How many cruise ships visited Denmark in August?"
     scripts/ask.sh --mode planner "..."      # always through the planner, for comparison
     scripts/ask.sh --single "..."            # Qwen3-8B alone (agent.py), for comparison
+    scripts/ask.sh --baseline "..."          # the same LLM alone with the data, not logged
+    scripts/ask.sh --student "..."           # the SQL student (sql-v6) alone, not logged
     scripts/ask.sh --feedback ID wrong "counted ferries too"
     scripts/ask.sh --feedback ID correct
 
@@ -97,7 +99,7 @@ def show_rows(result: dict) -> str:
 
 
 def ask(question: str, mode: str, thinking: bool) -> None:
-    if mode == "single":
+    if mode in ("single", "baseline"):
         from agent import run
     elif mode == "planner":
         from planner import run
@@ -133,10 +135,46 @@ def ask(question: str, mode: str, thinking: bool) -> None:
         print("    " + show_rows(step["result"]).replace("\n", "\n    "))
     print(f"\n=== Answer ({seconds} s)\n{trace['answer']}")
 
+    if mode == "baseline":  # not logged: the learned-question store would learn its SQL
+        print(f"\n(baseline: {llm_usage.summary(llm_calls)['calls']} LLM calls; not logged)")
+        return
     run_id = log_run(question, trace, mode, seconds, "cli", thinking, getpass.getuser(),
                      llm_usage.summary(llm_calls))
     print(f"\n(run id {run_id}; mark it with: scripts/ask.sh --feedback {run_id} correct|wrong "
           f"\"note\")")
+
+
+def student(question: str) -> None:
+    """The SQL student alone: its prompt as trained (schema and the places the question names),
+    one query, run with query_ais_data's guardrails. None of ask_data's fixes (spelled-out
+    requests, own place names, length caps, value and box checks). Not logged."""
+    import places
+    from ais_tool import extract_sql, query_ais_data
+    from openai import APIConnectionError
+    from planner import SCHEMA_CONTEXT, STUDENT_MODEL, student_base_url
+
+    named = places.mentioned(question, places.load())
+    start = time.time()
+    try:
+        with llm_usage.track() as llm_calls:
+            response = llm_usage.client(student_base_url()).chat.completions.create(
+                model=STUDENT_MODEL,
+                messages=[{"role": "system", "content": places.with_places(SCHEMA_CONTEXT, named)},
+                          {"role": "user", "content": question}],
+                temperature=0,
+                max_tokens=512,
+            )
+    except APIConnectionError:
+        sys.exit("The student server is not reachable (llm-student job or p7-student).")
+    sql = extract_sql(response.choices[0].message.content)
+    result = query_ais_data(sql)
+    print("\n=== Question\n" + question)
+    if named:
+        print(f"\n    places in the student's prompt: {', '.join(p.name for p in named)}")
+    print("    SQL:\n      " + sql.strip().replace("\n", "\n      "))
+    print("    " + show_rows(result).replace("\n", "\n    "))
+    print(f"\n(student alone: {llm_usage.summary(llm_calls)['calls']} LLM call, "
+          f"{round(time.time() - start, 1)} s; not logged)")
 
 
 def feedback(run_id: str, verdict: str, note: str) -> None:
@@ -154,6 +192,10 @@ def main() -> None:
                    help="routed (default): simple questions straight to the student, others via "
                         "the planner; planner: always the planner; single: Qwen3-8B alone")
     p.add_argument("--single", action="store_true", help="same as --mode single")
+    p.add_argument("--baseline", action="store_true",
+                   help="the LLM alone with the data tool, as --single, but not logged")
+    p.add_argument("--student", action="store_true",
+                   help="the SQL student alone: one query, no harness fixes, not logged")
     p.add_argument("--thinking", action="store_true", help="let Qwen3-8B reason (slower)")
     p.add_argument("--feedback", nargs="+", metavar=("ID", "VERDICT"),
                    help="mark a run: ID correct|wrong [note]")
@@ -166,7 +208,11 @@ def main() -> None:
     if not args.question:
         p.error("give a question")
     os.environ.setdefault("PYTHONWARNINGS", "ignore")
-    ask(" ".join(args.question), "single" if args.single else args.mode, args.thinking)
+    if args.student:
+        student(" ".join(args.question))
+        return
+    mode = "baseline" if args.baseline else "single" if args.single else args.mode
+    ask(" ".join(args.question), mode, args.thinking)
 
 
 if __name__ == "__main__":
