@@ -1,5 +1,5 @@
 {
- "about": "AIS transmitters with ship MMSIs that are not ships: platforms, jack-up rigs, fixed installations and test transmitters. ais_tool leaves them out of vessel_positions and vessel_days (the raw ais view keeps them). Found by name among MMSIs that (almost) never move, 2026-11-04; reviewed by hand.",
+ "about": "AIS transmitters with ship MMSIs that are not ships: platforms, jack-up rigs, fixed installations and test transmitters. ais_tool leaves them out of vessel_positions and vessel_days (the raw ais view keeps them). Found by name among MMSIs that (almost) never move, 2026-11-04; reviewed by hand. The M.A.R.S. PROJEKT transmitters (275-390 x 50-60 m, still on all but 2 days) were found as the 'largest tanker/cargo ship' at a moment.",
  "not_ships": [
   {"mmsi": 219440000, "name": "SOUTH ARNE", "kind": "platform"},
   {"mmsi": 219152899, "name": "TYRA WEST C", "kind": "platform"},
@@ -28,6 +28,9 @@
   {"mmsi": 266037000, "name": "KARLSKRONAVARVET", "kind": "installation"},
   {"mmsi": 232051546, "name": "TE FITI BUOY", "kind": "installation"},
   {"mmsi": 211548430, "name": "AMRUMBANK", "kind": "installation"},
+  {"mmsi": 219111111, "name": "M.A.R.S. PROJEKT 1", "kind": "installation"},
+  {"mmsi": 219111114, "name": "M.A.R.S. PROJEKT 2", "kind": "installation"},
+  {"mmsi": 219000003, "name": "M.A.R.S. PROJEKT 3", "kind": "installation"},
   {"mmsi": 219611000, "name": "FDK TEST", "kind": "test transmitter"},
   {"mmsi": 219380077, "name": "TESTSHIPTWO", "kind": "test transmitter"},
   {"mmsi": 219051000, "name": "FURUNO ESBJERG DEMO", "kind": "test transmitter"},
