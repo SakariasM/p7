@@ -70,9 +70,10 @@ def _store_snapshot() -> dict | None:
 
 def log_run(question: str, trace: dict, mode: str, seconds: float, source: str,
             thinking: bool = False, user: str | None = None, llm: dict | None = None,
-            log_dir: Path = LOG_DIR) -> str:
+            log_dir: Path = LOG_DIR, rows: int | None = LOG_ROWS) -> str:
     """Append one answered (or failed) question to today's log, with its LLM calls (llm_usage
-    summary) and the store's size; returns its run id."""
+    summary) and the store's size; returns its run id. rows = result rows kept per step
+    (None = all)."""
     run_id = time.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(3)
     append(log_dir / f"{time.strftime('%Y-%m-%d')}.jsonl", {
         "id": run_id, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "source": source,
@@ -85,7 +86,7 @@ def log_run(question: str, trace: dict, mode: str, seconds: float, source: str,
         "steps": [{"request": s.get("request"), "places": s.get("places"), "sql": s.get("sql"),
                    "error": s["result"].get("error"), "columns": s["result"].get("columns"),
                    "row_count": s["result"].get("row_count"),
-                   "rows": s["result"].get("rows", [])[:LOG_ROWS]}
+                   "rows": s["result"].get("rows", [])[:rows]}
                   for s in trace.get("tool_calls", [])],
     })
     return run_id
@@ -201,8 +202,9 @@ def student(question: str, mode: str = "student") -> None:
     trace = {"answer": answer, "tool_calls": [{"request": question, "sql": sql, "result": result,
                                                "places": [p.name for p in named]}]}
     llm = {**llm_usage.summary(llm_calls), "student_calls": 1, "planner_calls": 0}
+    # every row: eval_baseline.py scores the logged rows, and references can be longer than 20
     run_id = log_run(question, trace, mode, seconds, "cli", False, getpass.getuser(), llm,
-                     side_log_dir(mode))
+                     side_log_dir(mode), rows=None)
     print(f"\n({mode} alone: 1 LLM call, {seconds} s; run id {run_id} in {side_log_dir(mode)})")
 
 
