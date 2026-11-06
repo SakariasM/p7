@@ -647,10 +647,13 @@ e.g. <EXAMPLE>.
 Question: {question}"""
 
 # Lists of ships in an answer: up to MAX_NAMES_IN_ANSWER are named; a longer list gets the
-# count and a few examples. The map page shows the full list under the answer; elsewhere the
-# answer offers it (a follow-up needs a chat that keeps the conversation, not there yet).
+# count and MAX_NAMES_IN_ANSWER examples. The map page shows the full list under the answer;
+# elsewhere the answer offers it (a follow-up needs a chat that keeps the conversation, not
+# there yet). The examples are given to the 8B as their own line: asked to "name a few" or
+# "name 10" from the rows, it wrote out 12-254 names (cut at max_tokens) or counted the 100
+# rows it was shown instead of the total.
 MAX_NAMES_IN_ANSWER = 10
-MORE_ON_MAP = "say that the full list is shown below the answer"
+MORE_ON_MAP = "then add that all of them can be viewed in the full list below this answer"
 MORE_ELSEWHERE = "offer to list them all"
 
 PHRASE_PROMPT = """\
@@ -662,7 +665,7 @@ given (you may round decimals to two places), say what they count in everyday wo
 not reports; "different ships" only where it matters), and add nothing that is not in the data.
 If the data lists ships, always give how many there are (the row count, or a total column
 if there is one) and refer to ships by name where the data has one. Up to {max_names} ships:
-name them all. More: give the count, name a few as examples, and {more}.
+name them all. More than {max_names}: give the count, name the ships under 'Examples' below (and no others), and {more}.
 
 Question: {question}
 SQL: {sql}
@@ -958,17 +961,35 @@ def run_routed(question: str, max_turns: int = 10, enable_thinking: bool = False
     return trace if return_trace else trace["answer"]
 
 
+def example_ships(result: dict) -> list[str]:
+    """The first MAX_NAMES_IN_ANSWER ships of a longer list of ships (by name, else MMSI), for
+    the answer to name as examples; [] for anything else."""
+    columns = [str(c).lower() for c in result.get("columns") or []]
+    rows = result.get("rows") or []
+    if result.get("total_rows", len(rows)) <= MAX_NAMES_IN_ANSWER:
+        return []
+    for column in ("name", "mmsi"):
+        if column in columns:
+            i = columns.index(column)
+            return [str(r[i]) for r in rows[:MAX_NAMES_IN_ANSWER] if r[i] is not None]
+    return []
+
+
 def phrase(planner: OpenAI, question: str, step: dict, map_view: bool = False) -> str:
     """The 8B's plain-text answer from one query's result (the direct route's wording)."""
     result = step["result"]
+    prompt = PHRASE_PROMPT.format(
+        max_names=MAX_NAMES_IN_ANSWER,
+        more=(MORE_ON_MAP if map_view else MORE_ELSEWHERE),
+        question=question, sql=step["sql"], columns=result["columns"],
+        rows=json.dumps(result["rows"][:MAX_ROWS_FOR_PLANNER], default=str),
+        row_count=result.get("total_rows", len(result["rows"])))
+    examples = example_ships(result)
+    if examples:
+        prompt += f"\nExamples: {', '.join(examples)}"
     response = planner.chat.completions.create(
         model=MODEL_PATH,
-        messages=[{"role": "user", "content": PHRASE_PROMPT.format(
-            max_names=MAX_NAMES_IN_ANSWER,
-            more=(MORE_ON_MAP if map_view else MORE_ELSEWHERE),
-            question=question, sql=step["sql"], columns=result["columns"],
-            rows=json.dumps(result["rows"][:MAX_ROWS_FOR_PLANNER], default=str),
-            row_count=result.get("total_rows", len(result["rows"])))}],
+        messages=[{"role": "user", "content": prompt}],
         temperature=0,
         max_tokens=300,
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
