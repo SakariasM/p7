@@ -1,7 +1,8 @@
 # p7
 
-AIS data pipeline and API. Stand-in data comes from the Danish Maritime Authority's
-open daily dumps (http://aisdata.ais.dk/) while the project database is unavailable.
+AIS data pipeline and API. The data is the Danish Maritime Authority's open daily dumps
+(http://aisdata.ais.dk/). There is no database server: cleaned data is stored as Parquet
+files and queried in-process with DuckDB.
 
 ## Use the shared API (start here)
 
@@ -180,7 +181,7 @@ src/ais/
   ingest.py        fetch DMA zips, typed parse of the raw CSV
   clean.py         named cleaning steps, positions/vessels split, quality log
   derive.py        bad-fix removal, stop detection, trip segmentation, simplified geometry
-  store/base.py    AisStore Protocol (DuckDB now, Postgres/PostGIS later)
+  store/base.py    AisStore Protocol; DuckDB over Parquet is the only implementation
   store/duckdb_store.py
   api.py           FastAPI app, server-side limits
   ui/index.html    AIS Explorer page structure, served at /
