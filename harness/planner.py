@@ -334,6 +334,8 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
     sql = cap_lengths(extract_sql(response.choices[0].message.content))
     stray = places.unexplained_boxes(sql, named, request)
     bad = invalid_values(sql)
+    unknown = unknown_list_places(sql)
+    known_boxes = "; ".join(places.format_place(p).strip() for p in named)
     if bad:
         column, value = bad[0]
         likely = TYPE_SYNONYMS.get(value.lower()) if column == "ship_type" else None
@@ -343,13 +345,37 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
                              f"Rephrase the request yourself; do not ask the user."}
     elif stray:
         # Name the right boxes: the planner once copied the wrong box from this message.
-        known_boxes = "; ".join(places.format_place(p).strip() for p in named)
         result = {"error": "The SQL used an area that is not a place named in the request. "
                            + (f"The named places are {known_boxes}. Ask again naming the place."
                               if named else "Check places with find_place and name them.")}
+    elif unknown:
+        result = {"error": f"The SQL looked up '{unknown[0]}' in the per-day place lists, which "
+                           "hold only the known places by their exact names, so it would find "
+                           "nothing. "
+                           + (f"The named places are {known_boxes}. Ask again naming the place."
+                              if named else "Check the place with find_place and name it; for a "
+                                            "place find_place does not know, give its lon/lat "
+                                            "box.")}
     else:
         result = with_total(sql, with_names(query_ais_data(sql)))
     return {"request": request, "places": [p.name for p in named], "sql": sql, "result": result}
+
+
+_PLACE_LIST_RE = re.compile(
+    r"\blist_(?:contains|has_any|has_all)\s*\(\s*(?:\w+\.)?(?:places|still_in|moving_in)\s*,\s*"
+    r"(\[[^\]]*\]|'(?:[^']|'')*')", re.IGNORECASE)
+
+
+def unknown_list_places(sql: str) -> list[str]:
+    """Names the SQL looks up in vessel_days' place lists (places, still_in, moving_in) that
+    are not in them. The lists hold the places of places.json by their exact names, so any other
+    name finds nothing: "ships through EK R 19 MULTEX", a name in no list, gave a count of 0."""
+    names = [n.replace("''", "'") for arg in _PLACE_LIST_RE.findall(sql)
+             for n in re.findall(r"'((?:[^']|'')*)'", arg)]
+    if not names:
+        return []
+    known = {p.name for p in places.load(include_learned=False)}
+    return [n for n in names if n not in known]
 
 
 def own_place_names(request: str, named: list[places.Place]) -> str:
@@ -663,15 +689,20 @@ rows, entries or how the data was found - just state the answer,
 e.g. "63 ships were docked in Skagen at 08:00 on 3 March 2026." Use the numbers exactly as
 given (you may round decimals to two places), say what they count in everyday words (ships,
 not reports; "different ships" only where it matters), and add nothing that is not in the data.
-If the data lists ships, always give how many there are (the row count, or a total column
-if there is one) and refer to ships by name where the data has one. Up to {max_names} ships:
-name them all. More than {max_names}: give the count, name the ships under 'Examples' below (and no others), and {more}.
-
+{list_rule}
 Question: {question}
 SQL: {sql}
 Columns: {columns}
-Rows (at most the first 100): {rows}
-Number of rows: {row_count}"""
+Rows (at most the first 100): {rows}{list_lines}"""
+
+# Only for a list of ships, with "Number of rows" (and the examples) after the rows. Given to
+# every result, the 8B read "Number of rows: 1" of a one-number result as the answer: a count
+# of 0 or 7 became "There was 1 vessel", sometimes with an invented name.
+LIST_RULE = """\
+If the data lists ships, always give how many there are (the row count, or a total column
+if there is one) and refer to ships by name where the data has one. Up to {max_names} ships:
+name them all. More than {max_names}: give the count, name the ships under 'Examples' below (and no others), and {more}.
+"""
 
 
 # --- questions about times outside the data -----------------------------------------------
@@ -961,6 +992,13 @@ def run_routed(question: str, max_turns: int = 10, enable_thinking: bool = False
     return trace if return_trace else trace["answer"]
 
 
+def ship_list(result: dict) -> bool:
+    """The result lists ships: a name or MMSI column and more than one row."""
+    columns = [str(c).lower() for c in result.get("columns") or []]
+    return (("name" in columns or "mmsi" in columns)
+            and result.get("total_rows", len(result.get("rows") or [])) > 1)
+
+
 def example_ships(result: dict) -> list[str]:
     """The first MAX_NAMES_IN_ANSWER ships of a longer list of ships (by name, else MMSI), for
     the answer to name as examples; [] for anything else."""
@@ -978,15 +1016,20 @@ def example_ships(result: dict) -> list[str]:
 def phrase(planner: OpenAI, question: str, step: dict, map_view: bool = False) -> str:
     """The 8B's plain-text answer from one query's result (the direct route's wording)."""
     result = step["result"]
+    listed = ship_list(result)
+    list_lines = ""
+    if listed:
+        list_lines = f"\nNumber of rows: {result.get('total_rows', len(result['rows']))}"
+        examples = example_ships(result)
+        if examples:
+            list_lines += f"\nExamples: {', '.join(examples)}"
     prompt = PHRASE_PROMPT.format(
-        max_names=MAX_NAMES_IN_ANSWER,
-        more=(MORE_ON_MAP if map_view else MORE_ELSEWHERE),
+        list_rule=(LIST_RULE.format(max_names=MAX_NAMES_IN_ANSWER,
+                                    more=(MORE_ON_MAP if map_view else MORE_ELSEWHERE))
+                   if listed else ""),
         question=question, sql=step["sql"], columns=result["columns"],
         rows=json.dumps(result["rows"][:MAX_ROWS_FOR_PLANNER], default=str),
-        row_count=result.get("total_rows", len(result["rows"])))
-    examples = example_ships(result)
-    if examples:
-        prompt += f"\nExamples: {', '.join(examples)}"
+        list_lines=list_lines)
     response = planner.chat.completions.create(
         model=MODEL_PATH,
         messages=[{"role": "user", "content": prompt}],
