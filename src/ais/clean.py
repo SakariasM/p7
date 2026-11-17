@@ -14,6 +14,7 @@ from typing import Literal
 import duckdb
 
 from ais.ingest import CLEAN_TEXT_MACRO, typed_source
+from ais.limits import apply_limits
 from ais.paths import CLEAN_TABLES, DataPaths
 
 MMSI_MIN, MMSI_MAX = 200_000_000, 799_999_999
@@ -124,6 +125,7 @@ def clean_day(source: Path, day: date, paths: DataPaths) -> list[StepResult]:
         tmp = Path(tmp_str)
         # File-backed so a full day (~17M rows) spills to disk instead of exhausting RAM.
         con = duckdb.connect(str(tmp / "work.duckdb"))
+        apply_limits(con)
         con.execute(CLEAN_TEXT_MACRO)
 
         staged = tmp / "staged.parquet"

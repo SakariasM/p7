@@ -11,6 +11,7 @@ import typer
 from ais.clean import clean_day
 from ais.derive import derive as derive_all
 from ais.ingest import fetch as fetch_zip
+from ais.ingest import write_processed
 from ais.paths import CLEAN_TABLES, DataPaths
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -60,6 +61,37 @@ def clean(
     Run `ais derive` afterwards to rebuild trips and stops."""
     _process(_paths(), day.date(), keep_raw)
     build_duckdb()
+
+
+@app.command()
+def process(
+    day: Day,
+    processed_dir: Annotated[
+        Path,
+        typer.Option(
+            envvar="AIS_PROCESSED_DIR",
+            help="Folder to write date=YYYY-MM-DD/ais.parquet into",
+        ),
+    ] = PROCESSED_DIR,
+    force: Annotated[bool, typer.Option(help="Rewrite a day that already exists")] = False,
+    keep_raw: Annotated[bool, typer.Option(help="Keep the 600 MB raw zip afterwards")] = False,
+) -> None:
+    """Fetch (if needed) one DMA daily zip and write it as processed Parquet.
+
+    That is the layout of AI-LAB's dump, the input of `clean-processed` and of the agent
+    harness, so a new day goes: `ais process`, then `ais clean-processed DAY DAY`."""
+    d = day.date()
+    dest = processed_dir / f"date={d.isoformat()}" / "ais.parquet"
+    if dest.exists() and not force:
+        typer.echo(f"{d}: already processed")
+        return
+    typer.echo(f"{d}: fetching")
+    raw = fetch_zip(d, _paths().raw_zip(d))
+    typer.echo(f"{d}: writing {dest}")
+    rows = write_processed(raw, d, dest)
+    typer.echo(f"{d}: {rows:,} rows")
+    if not keep_raw:
+        raw.unlink()
 
 
 @app.command()
@@ -119,7 +151,11 @@ def clean_processed(
 
 
 @app.command()
-def derive() -> None:
+def derive(
+    build: Annotated[
+        bool, typer.Option(help="Rebuild ais.duckdb at the end; `ais serve` doesn't need it")
+    ] = True,
+) -> None:
     """Rebuild trips, stops and trip geometry (data/derived/) from all cleaned days."""
     r = derive_all(_paths(), progress=typer.echo)
     typer.echo(
@@ -127,7 +163,8 @@ def derive() -> None:
         f" (removed {r.outside_coverage} outside coverage, {r.outliers_removed} outliers,"
         f" {r.spikes_removed} spikes; {r.jump_splits} splits at impossible jumps)"
     )
-    build_duckdb()
+    if build:
+        build_duckdb()
 
 
 @app.command("build-duckdb")

@@ -5,7 +5,7 @@ import duckdb
 import pytest
 
 from ais.clean import MMSI_MAX, MMSI_MIN, SOG_SENTINEL, StepResult, clean_day
-from ais.ingest import CLEAN_TEXT_MACRO, processed_select, typed_select
+from ais.ingest import CLEAN_TEXT_MACRO, processed_select, typed_select, write_processed
 from ais.paths import DataPaths
 
 from .conftest import DAY, PREV_DAY, fixture_for
@@ -106,6 +106,63 @@ def test_processed_parquet_cleans_like_the_csv(
     assert results == cleaned[DAY]  # incl. the SOG sentinel stored as FLOAT 102.2
     for table in ("positions", "vessels", "quality"):
         assert _digest(other, table, DAY) == _digest(paths, table, DAY), table
+
+
+def test_write_processed_has_the_dump_layout_and_cleans_like_the_csv(
+    paths: DataPaths, tmp_path: Path, cleaned: dict[date, list[StepResult]]
+) -> None:
+    other = DataPaths(tmp_path / "from-processed")
+    parquet = tmp_path / "processed" / f"date={DAY}" / "ais.parquet"
+
+    assert write_processed(fixture_for(DAY, tmp_path), DAY, parquet) == 27
+
+    assert [p.name for p in parquet.parent.iterdir()] == ["ais.parquet"]
+    # The columns of AI-LAB's dump, which the agent harness reads by name.
+    layout = duckdb.sql(f"SELECT column_name, column_type FROM (DESCRIBE FROM '{parquet}')")
+    assert layout.fetchall() == [
+        ("ts", "TIMESTAMP"), ("mobile_type", "VARCHAR"), ("mmsi", "BIGINT"), ("lat", "DOUBLE"),
+        ("lon", "DOUBLE"), ("nav_status", "VARCHAR"), ("rot", "FLOAT"), ("sog", "FLOAT"),
+        ("cog", "FLOAT"), ("heading", "SMALLINT"), ("imo", "BIGINT"), ("callsign", "VARCHAR"),
+        ("name", "VARCHAR"), ("ship_type", "VARCHAR"), ("cargo_type", "VARCHAR"),
+        ("width", "SMALLINT"), ("length", "SMALLINT"), ("pos_fix_device", "VARCHAR"),
+        ("draught", "FLOAT"), ("destination", "VARCHAR"), ("eta", "TIMESTAMP"),
+        ("data_source", "VARCHAR"), ("dim_a", "SMALLINT"), ("dim_b", "SMALLINT"),
+        ("dim_c", "SMALLINT"), ("dim_d", "SMALLINT"), ("date", "DATE"),
+    ]  # fmt: skip
+    # It keeps the DMA's own text, which the harness filters on ('Unknown' is not NULL).
+    assert _one(f"SELECT count(*) FROM '{parquet}' WHERE callsign = 'Unknown'") == 17
+    results = clean_day(parquet, DAY, other)
+    assert results == cleaned[DAY]
+    for table in ("positions", "vessels", "quality"):
+        assert _digest(other, table, DAY) == _digest(paths, table, DAY), table
+
+
+def test_write_processed_rejects_rows_from_another_day(tmp_path: Path) -> None:
+    dest = tmp_path / f"date={PREV_DAY}" / "ais.parquet"
+    with pytest.raises(ValueError, match="outside"):
+        write_processed(fixture_for(DAY, tmp_path), PREV_DAY, dest)
+    assert not list(dest.parent.iterdir())
+
+
+def test_a_doubled_quote_far_into_the_file_is_read(tmp_path: Path) -> None:
+    # With the dialect left to DuckDB's sniffer, a plain quoted name in the first 2,048 rows
+    # and a doubled quote further down fail with "unterminated quote", as 2026-10-02 did.
+    header, first, *_ = fixture_for(DAY, tmp_path).read_text().splitlines()
+    plain = first.replace(",ALPHA,", ',"DEEP 8,1",')
+    doubled = first.replace(",ALPHA,", ',"UST-113 ""AGAT""",')
+    assert first not in (plain, doubled)
+    csv = tmp_path / "late-quote.csv"
+    csv.write_text("\n".join([header, plain, *[first] * 3_000, doubled]) + "\n")
+    parquet = tmp_path / "late-quote.parquet"
+
+    assert write_processed(csv, DAY, parquet) == 3_002
+
+    names = [("ALPHA",), ("DEEP 8,1",), ('UST-113 "AGAT"',)]
+    assert duckdb.sql(f"SELECT DISTINCT name FROM '{parquet}' ORDER BY 1").fetchall() == names
+    con = duckdb.connect()
+    con.execute(CLEAN_TEXT_MACRO)
+    typed = con.sql(f"SELECT DISTINCT name FROM ({typed_select(str(csv))}) ORDER BY 1")
+    assert typed.fetchall() == names
 
 
 def test_processed_floats_keep_their_decimal_value(tmp_path: Path) -> None:

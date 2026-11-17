@@ -69,6 +69,11 @@ def test_timezone_is_converted_to_utc(client: TestClient) -> None:
     assert r.json()["total_points"] == 6
 
 
+def test_coverage(client: TestClient) -> None:
+    r = client.get("/coverage")
+    assert r.json() == {"first_day": "2026-09-23", "last_day": "2026-09-24"}
+
+
 def test_snapshot(client: TestClient) -> None:
     r = client.get("/snapshot", params={"bbox": BBOX, "at": "2026-09-24T00:05:00"})
     assert r.status_code == 200

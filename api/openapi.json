@@ -1,6 +1,27 @@
 {
   "components": {
     "schemas": {
+      "Coverage": {
+        "description": "The days the data covers. On the hosting machine a day is added every night.",
+        "properties": {
+          "first_day": {
+            "format": "date",
+            "title": "First Day",
+            "type": "string"
+          },
+          "last_day": {
+            "format": "date",
+            "title": "Last Day",
+            "type": "string"
+          }
+        },
+        "required": [
+          "first_day",
+          "last_day"
+        ],
+        "title": "Coverage",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -767,6 +788,28 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/coverage": {
+      "get": {
+        "description": "The first and last day with data, e.g. for the limits of a date picker.",
+        "operationId": "coverage_coverage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Coverage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Coverage",
+        "tags": [
+          "map"
+        ]
+      }
+    },
     "/health": {
       "get": {
         "operationId": "health_health_get",

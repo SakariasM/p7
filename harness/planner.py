@@ -331,7 +331,8 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
         max_tokens=1024 if model == MODEL_PATH else 512,
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
-    sql = cap_lengths(extract_sql(response.choices[0].message.content))
+    written = cap_lengths(extract_sql(response.choices[0].message.content))
+    sql = fix_years(written, request)
     stray = places.unexplained_boxes(sql, named, request)
     bad = invalid_values(sql)
     unknown = unknown_list_places(sql)
@@ -358,7 +359,8 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
                                             "box.")}
     else:
         result = with_total(sql, with_names(query_ais_data(sql)))
-    return {"request": request, "places": [p.name for p in named], "sql": sql, "result": result}
+    step = {"request": request, "places": [p.name for p in named], "sql": sql, "result": result}
+    return step if sql == written else {**step, "sql_as_written": written}
 
 
 _PLACE_LIST_RE = re.compile(
@@ -402,6 +404,78 @@ def cap_lengths(sql: str) -> str:
     SANTANDER at 436 m)."""
     return _LENGTH_FLOOR_RE.sub(
         lambda m: f"{m.group(1)}{m.group(2)} AND {m.group(1)}length <= {MAX_REAL_LENGTH_M}", sql)
+
+
+# The student learned every month with one year, the one it has in 2025-10-01..2026-09-30 (its
+# training data), and writes that year whatever the request says: after the daily update added
+# days past that year, "on 10 November 2026" got DATE '2025-11-10' and the answer gave 2025's
+# count as 2026's.
+_MONTH_WORD = "|".join(f"{n[:3]}(?:{n[3:]})?" for n in _MONTH_NAMES) + "|sept"
+_DAY_MONTH_YEAR_RE = re.compile(
+    rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+(?:of\s+)?({_MONTH_WORD})\b\.?,?\s+(\d{{4}})\b",
+    re.IGNORECASE)
+_MONTH_DAY_YEAR_RE = re.compile(
+    rf"\b({_MONTH_WORD})\b\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+(\d{{4}})\b", re.IGNORECASE)
+_ISO_DATE_RE = re.compile(r"(?<![\d-])(\d{4})-(\d{2})-(\d{2})(?![\d-])")
+YEAR_FIX_REACH = timedelta(days=31)
+
+
+def _as_dates(parts) -> set[date]:
+    """(year, month, day) triples as dates; a triple that is no date is left out."""
+    dates = set()
+    for y, m, d in parts:
+        try:
+            dates.add(date(int(y), int(m), int(d)))
+        except ValueError:
+            pass
+    return dates
+
+
+def dates_with_year(text: str) -> set[date]:
+    """The dates a text gives with their year: 2026-11-10, 10 November 2026, Nov 10th, 2026."""
+    months = [n[:3].lower() for n in _MONTH_NAMES]
+    return _as_dates(
+        _ISO_DATE_RE.findall(text)
+        + [(y, months.index(m[:3].lower()) + 1, d)
+           for d, m, y in _DAY_MONTH_YEAR_RE.findall(text)]
+        + [(y, months.index(m[:3].lower()) + 1, d)
+           for m, d, y in _MONTH_DAY_YEAR_RE.findall(text)])
+
+
+def fix_years(sql: str, request: str) -> str:
+    """The SQL with the years the request gives. A date in the SQL that the request names with
+    the same month and day but another year gets the request's year (not when the request
+    names that day in two years). So does a date the request does not name that is at most 31
+    days from such a date: the day after a period's end, or the start of "7 to 13 November
+    2026". Everything else stays, so the SQL comes back unchanged when the request names no
+    date with a year or the SQL already has the request's dates.
+
+    Only a day the data has counts as named. For a day outside it the student's year stays:
+    when the planner asked for 23 September 2025 in a question about 2026, the student's
+    2026-09-23 was the right day. So while the data is the year the student was trained on,
+    this changes nothing."""
+    named = {d for d in dates_with_year(request) if FIRST_DAY <= d <= LAST_DAY}
+    years: dict[tuple[int, int], set[int]] = {}
+    for d in named:
+        years.setdefault((d.month, d.day), set()).add(d.year)
+    in_sql = _as_dates(_ISO_DATE_RE.findall(sql)) - named
+    wrong = {d: next(iter(years[d.month, d.day])) - d.year for d in in_sql
+             if len(years.get((d.month, d.day), ())) == 1}
+    if not wrong:
+        return sql
+    add = dict(wrong)  # date in the SQL -> years to add
+    for d in in_sql - set(wrong):
+        nearest = min(wrong, key=lambda w: abs(w - d))
+        if abs(nearest - d) <= YEAR_FIX_REACH:
+            add[d] = wrong[nearest]
+
+    def fixed(m: re.Match) -> str:
+        try:
+            d = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            return d.replace(year=d.year + add[d]).isoformat() if d in add else m.group(0)
+        except ValueError:  # not a date, or 29 February moved to a year without one
+            return m.group(0)
+    return _ISO_DATE_RE.sub(fixed, sql)
 
 
 def with_total(sql: str, result: dict) -> dict:
