@@ -1,6 +1,6 @@
 """Store contract tests. Parametrize `store` over new implementations (e.g. Postgres)."""
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -10,6 +10,11 @@ from ais.store.base import AisStore, DerivedDataMissing
 A, B = 219000001, 219000002
 DAY_START = datetime(2026, 9, 24)
 DK = BBox(min_lon=7.5, min_lat=54.5, max_lon=15.5, max_lat=58.0)
+
+
+def test_coverage(store: AisStore) -> None:
+    c = store.coverage()
+    assert (c.first_day, c.last_day) == (date(2026, 9, 23), date(2026, 9, 24))
 
 
 def test_vessel(store: AisStore) -> None:

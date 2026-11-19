@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from ais.models import (
     BBox,
+    Coverage,
     Route,
     Snapshot,
     Stops,
@@ -199,6 +200,11 @@ def create_app(store: AisStore | None) -> FastAPI:
     ) -> Track:
         start, end = check_window(start, end, MAX_TRACK_WINDOW)
         return s.track(mmsi, start, end, max_points)
+
+    @app.get("/coverage", response_model=Coverage, tags=["map"])
+    def coverage(s: StoreDep) -> Coverage:
+        """The first and last day with data, e.g. for the limits of a date picker."""
+        return s.coverage()
 
     @app.get("/snapshot", response_model=Snapshot, tags=["map"])
     def snapshot(
