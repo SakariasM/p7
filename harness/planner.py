@@ -391,11 +391,13 @@ def plain_words(request: str) -> str:
 
 
 def ask_data(student: OpenAI, request: str, session: list[places.Place] | None = None,
-             model: str = STUDENT_MODEL) -> dict:
+             model: str = STUDENT_MODEL, question: str = "") -> dict:
     """The SQL writer (the student, or with model=MODEL_PATH the 8B, for comparison) writes SQL
     for the request; its prompt lists only the places the request names, including places
     accepted for this question. Unless the SQL uses an unexplained box or a value the data
-    does not have, it runs through query_ais_data."""
+    does not have, it runs through query_ais_data. question is the user's question when the
+    planner wrote the request: a unit it asks for (nautical miles) holds even if the request
+    leaves it out."""
     request = plain_words(spell_out(request))
     named = places.mentioned(request, places.load() + (session or []))
     request = own_place_names(request, named)
@@ -408,7 +410,8 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
     written = cap_lengths(extract_sql(response.choices[0].message.content))
-    sql = fix_years(written, request)
+    sql = fix_distance(fix_place_lists(fix_years(written, request)),
+                       bool(_NAUTICAL_RE.search(f"{request} {question}")))
     stray = places.unexplained_boxes(sql, named, request)
     bad = invalid_values(sql)
     unknown = unknown_list_places(sql)
@@ -480,6 +483,57 @@ def cap_lengths(sql: str) -> str:
     SANTANDER at 436 m)."""
     return _LENGTH_FLOOR_RE.sub(
         lambda m: f"{m.group(1)}{m.group(2)} AND {m.group(1)}length <= {MAX_REAL_LENGTH_M}", sql)
+
+
+_PLACES_AND_ANY_RE = re.compile(
+    r"list_contains\(\s*places\s*,\s*('(?:[^']|'')*')\s*\)\s+AND\s+(moving_in|still_in)"
+    r"\s+IS\s+NOT\s+NULL"
+    r"|(moving_in|still_in)\s+IS\s+NOT\s+NULL\s+AND\s+list_contains\(\s*places\s*,\s*"
+    r"('(?:[^']|'')*')\s*\)", re.IGNORECASE)
+
+
+def fix_place_lists(sql: str) -> str:
+    """`list_contains(places, 'X') AND moving_in IS NOT NULL` is a ship in X that moved
+    anywhere that day; the question means moving in X, `list_contains(moving_in, 'X')` (as the
+    student wrote for Aarhus). "Mean daily number of moving ships in Esbjerg" gave 84.4, the
+    ships present, instead of 27.7. The same for still_in."""
+    return _PLACES_AND_ANY_RE.sub(
+        lambda m: f"list_contains({m.group(2) or m.group(3)}, {m.group(1) or m.group(4)})", sql)
+
+
+_NAUTICAL_RE = re.compile(r"\bnautical\s+miles?\b|\bsea\s*miles?\b|\bnmi?\b", re.IGNORECASE)
+_DISTANCE_SUM_RE = re.compile(
+    r"sum\(haversine_m\(prev_lat,\s*prev_lon,\s*lat,\s*lon\)\)\s*/\s*(1000|1852)(?:\.0*)?"
+    r"\s+AS\s+\w+", re.IGNORECASE)
+_UNORDERED_LAG_RE = re.compile(r"OVER\s*\(\s*ORDER\s+BY\s+ts\s*\)", re.IGNORECASE)
+_INNER_SELECT_RE = re.compile(r"SELECT\s+lat,\s*lon,\s*(?=lag\()", re.IGNORECASE)
+_PREV_LON_RE = re.compile(r"\bAS\s+prev_lon\b", re.IGNORECASE)
+MAX_STEP_SQL = "INTERVAL 1 HOUR"  # as distance_km in build_vessel_days.py
+
+
+def fix_distance(sql: str, nautical: bool = False) -> str:
+    """The student's distance query (vessel_distance in sql_templates.py) sums the steps between
+    reports in time order. Over a month it also summed straight lines across gaps in coverage
+    and, with two ships of one name, steps between them: STENA SUNRISE in May 2026 came to
+    652 km, distance_km (steps at most an hour apart, per vessel) to 487 km. The query gets the
+    same steps as distance_km, and the column says its unit; with nautical=True (the question
+    asks for nautical miles) it is in nautical miles. The student wrote /1852 and called the
+    column km, and the planner once gave a km result as nautical miles. Any other SQL comes
+    back unchanged."""
+    total = _DISTANCE_SUM_RE.search(sql)
+    if not (total and _UNORDERED_LAG_RE.search(sql) and _INNER_SELECT_RE.search(sql)
+            and len(_PREV_LON_RE.findall(sql)) == 1):
+        return sql
+    nautical = nautical or total.group(1) == "1852"
+    unit, divisor = ("nautical_miles", 1852) if nautical else ("km", 1000)
+    sql = (sql[:total.start()]
+           + f"round(sum(haversine_m(prev_lat, prev_lon, lat, lon)) FILTER (WHERE ts - prev_ts"
+             f" <= {MAX_STEP_SQL}) / {divisor}, 1) AS {unit}"
+           + sql[total.end():])
+    sql = _UNORDERED_LAG_RE.sub("OVER (PARTITION BY mmsi ORDER BY ts)", sql)
+    sql = _INNER_SELECT_RE.sub("SELECT ts, lat, lon, ", sql, count=1)
+    return _PREV_LON_RE.sub("AS prev_lon,\n         lag(ts) OVER (PARTITION BY mmsi ORDER BY ts)"
+                            " AS prev_ts", sql, count=1)
 
 
 # The student learned every month with one year, the one it has in 2025-10-01..2026-09-30 (its
@@ -735,7 +789,7 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
                         "result": {"error": "This exact request already failed and would fail "
                                             "again. Rephrase it more simply or split it."}}
             else:
-                step = ask_data(student, request, session, model=sql_model)
+                step = ask_data(student, request, session, model=sql_model, question=question)
                 if "error" in step["result"]:
                     failed.add(key)
             print(f"[ask_data] {request}\n    -> {step['sql']}", file=sys.stderr)
