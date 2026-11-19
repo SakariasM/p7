@@ -770,6 +770,8 @@ rows, entries or how the data was found - just state the answer,
 e.g. "63 ships were docked in Skagen at 08:00 on 3 March 2026." Use the numbers exactly as
 given (you may round decimals to two places), say what they count in everyday words (ships,
 not reports; "different ships" only where it matters), and add nothing that is not in the data.
+If the result is one number, that number is the answer; 0 means none, so say so (e.g. "No
+tankers were docked in Skagen on 3 May 2026.").
 {list_rule}
 Question: {question}
 SQL: {sql}
