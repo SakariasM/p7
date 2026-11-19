@@ -93,9 +93,10 @@ How to work:
      Danish waters, or no place given = the whole data, so name no place; ships passing
      under a bridge = moving vessels (speed at least 1 knot) inside the bridge's place, e.g.
      the Great Belt Bridge or the Little Belt bridges
-   - an average per day: ask for the average itself in one request, e.g. "What was the
-     average number of distinct vessels per day in Copenhagen from 1 to 31 March 2026?";
-     never ask for the vessels "each day" (that is read as vessels seen on every day)
+   - an average per day: ask for the average itself in one request, with every condition of
+     the question in it (docked, moving, a ship type, a length), e.g. "What was the average
+     number of tankers docked in Copenhagen per day from 1 to 30 September 2026?"; never
+     ask for the vessels "each day" (that is read as vessels seen on every day)
 {PERIOD_RULE}
    - no SQL, table or column names
 3. Call find_place for every place before your first request about it, and use the name it
@@ -689,8 +690,8 @@ each for a few named places at most (and at most about a week unless listed othe
   counts and the difference); two or three named places ranked by their counts
 - distinct vessels in any of two or three named ports (each vessel counted once); vessels
   seen in both of two ports; vessels in a place on one day that were not there on another
-- the average daily number of vessels (of a type) in a place or in the whole area, over any
-  period: a few days, a month or the whole year
+- the average daily number of vessels (of a type; docked, moving or passing a bridge) in a
+  place or in the whole area, over any period: a few days, a month or the whole year
 <LONG_PERIODS>
 Examples (the places and dates vary):
 - "Which two moving vessels came closest to each other in <place> between 09:00 and 09:10
@@ -703,6 +704,8 @@ Examples (the places and dates vary):
   -> direct (daily average)
 - "On average, how many ships were in <place> per day in <month>?" -> direct (daily average;
   a month or a year is still one query)
+- "What's the average number of ships that docked in <place> in <month>?" -> direct (daily
+  average of docked ships)
 - "How many cruise ships visited <country> in <month>?" -> plan (port calls in a country)
 - "Did the busiest of <place A> and <place B> on <date> also have the most tankers the
   week after?" -> plan (a result feeds a second question)
