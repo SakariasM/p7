@@ -245,14 +245,16 @@ def invalid_values(sql: str) -> list[tuple[str, str]]:
     return bad
 
 
-_ANNOUNCED_RE = re.compile(r"ask_data|find_place|propose_place|\blet me\b|\bI will\b|\bI'll\b",
-                           re.IGNORECASE)
+_ANNOUNCED_RE = re.compile(r"ask_data|find_place|propose_place|port_calls|\blet me\b|\bI will\b"
+                           r"|\bI'll\b", re.IGNORECASE)
 NUDGE = "Call the tool you announced now, or give your final answer if you cannot continue."
 
 
-def announced_step(content: str | None) -> bool:
-    """The planner described a next step instead of calling the tool for it."""
-    return bool(_ANNOUNCED_RE.search(strip_thinking(content)))
+def announced_step(content: str | None, has_data: bool = True) -> bool:
+    """The planner described a next step instead of calling the tool for it. Before any data
+    step, a turn that is only its plan ("Plan: 1. ...") counts too: it was once the answer."""
+    text = strip_thinking(content)
+    return bool(_ANNOUNCED_RE.search(text)) or (not has_data and text.lower().startswith("plan:"))
 
 
 CRUISE_NOTE = (
@@ -608,7 +610,7 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
         if plan is None and strip_thinking(message.content):
             plan = strip_thinking(message.content)
 
-        if not message.tool_calls and announced_step(message.content) and nudges < 2:
+        if not message.tool_calls and announced_step(message.content, bool(steps)) and nudges < 2:
             nudges += 1
             messages.append({"role": "user", "content": NUDGE})
             continue
