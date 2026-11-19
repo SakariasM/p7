@@ -6,7 +6,7 @@ so DuckDB only opens the days it needs.
 
 import json
 import math
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import duckdb
@@ -14,6 +14,7 @@ import duckdb
 from ais.derive import DERIVED_TABLES
 from ais.models import (
     BBox,
+    Coverage,
     LineString,
     Route,
     RouteLeg,
@@ -101,6 +102,7 @@ class DuckDBStore:
             raise FileNotFoundError(
                 f"No cleaned data under {paths.clean}. Run `uv run ais dev` first."
             )
+        self._positions_dir = paths.clean / "positions"
         self._con = duckdb.connect()
         self._has_derived = has_derived(paths)
         create_views(self._con, paths)
@@ -111,6 +113,14 @@ class DuckDBStore:
 
     def close(self) -> None:
         self._con.close()
+
+    def coverage(self) -> Coverage:
+        # From the day folders, which the views also read, so a day added while the API runs
+        # is there at once.
+        days = sorted(p.name.removeprefix("date=") for p in self._positions_dir.glob("date=*"))
+        return Coverage(
+            first_day=date.fromisoformat(days[0]), last_day=date.fromisoformat(days[-1])
+        )
 
     def vessel(self, mmsi: int) -> Vessel | None:
         rows = _rows(self._cursor(), "SELECT * FROM vessels WHERE mmsi = ?", [mmsi])

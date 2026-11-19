@@ -11,6 +11,10 @@ from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
+import duckdb
+
+from ais.limits import apply_limits
+
 DMA_URL = "http://aisdata.ais.dk/aisdk-{day}.zip"
 N_RAW_COLUMNS = 26
 
@@ -21,7 +25,9 @@ def fetch(day: date, dest: Path) -> Path:
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_suffix(".zip.part")
-    with urllib.request.urlopen(DMA_URL.format(day=day.isoformat())) as resp, part.open("wb") as f:
+    url = DMA_URL.format(day=day.isoformat())
+    # The timeout is per read, so a stalled connection fails instead of hanging a nightly run.
+    with urllib.request.urlopen(url, timeout=120) as resp, part.open("wb") as f:
         shutil.copyfileobj(resp, f, length=1 << 20)
     part.rename(dest)
     return dest
@@ -63,10 +69,23 @@ def csv_source(path: Path) -> Generator[str]:
             raise error[0]
 
 
-def typed_select(src: str) -> str:
-    """SELECT over a raw DMA CSV with typed, snake_case columns; sentinels become NULL."""
+def raw_csv(src: str) -> str:
+    """read_csv over a raw DMA CSV: 26 text columns, column00..column25.
+
+    The dialect is stated in full and DuckDB's sniffer is off. Left to guess, it settles the
+    quote escape on the first 2,048 rows: a quoted name without a doubled quote there ("DEEP
+    8,1") makes it read the file with no escape, and the first doubled quote further down
+    (2026-10-02, line 32,960, the name UST-113 "AGAT") fails with 'unterminated quote'."""
     columns = ", ".join(f"'column{i:02d}': 'VARCHAR'" for i in range(N_RAW_COLUMNS))
     src_sql = src.replace("'", "''")
+    return (
+        f"read_csv('{src_sql}', auto_detect = false, header = false, skip = 1, delim = ',',"
+        f" quote = '\"', escape = '\"', all_varchar = true, columns = {{{columns}}})"
+    )
+
+
+def typed_select(src: str) -> str:
+    """SELECT over a raw DMA CSV with typed, snake_case columns; sentinels become NULL."""
     return f"""
     SELECT
       strptime(column00, '%d/%m/%Y %H:%M:%S')      AS ts,
@@ -95,8 +114,7 @@ def typed_select(src: str) -> str:
       TRY_CAST(column23 AS DOUBLE)                 AS b,
       TRY_CAST(column24 AS DOUBLE)                 AS c,
       TRY_CAST(column25 AS DOUBLE)                 AS d
-    FROM read_csv('{src_sql}', header = false, skip = 1, delim = ',', quote = '"',
-                  all_varchar = true, columns = {{{columns}}})
+    FROM {raw_csv(src)}
     """
 
 
@@ -141,6 +159,79 @@ def processed_select(src: str) -> str:
       {num("dim_d")}                               AS d
     FROM read_parquet('{src_sql}')
     """
+
+
+def processed_layout_select(src: str, day: date) -> str:
+    """SELECT over a raw DMA CSV in the layout of the project's processed Parquet
+    (data/processed/ais/date=YYYY-MM-DD/ais.parquet), which processed_select and the agent
+    harness read: every row, the DMA's own text values ('Unknown', 'Undefined'; an empty field
+    is NULL), FLOAT/SMALLINT where that dump narrows them, its column names and a `date` column.
+
+    Checked against AI-LAB's dump: 2026-09-30 built this way has the same 24,677,317 rows,
+    value for value."""
+    return f"""
+    SELECT
+      strptime(column00, '%d/%m/%Y %H:%M:%S')      AS ts,
+      column01                                     AS mobile_type,
+      TRY_CAST(column02 AS BIGINT)                 AS mmsi,
+      TRY_CAST(column03 AS DOUBLE)                 AS lat,
+      TRY_CAST(column04 AS DOUBLE)                 AS lon,
+      column05                                     AS nav_status,
+      TRY_CAST(column06 AS FLOAT)                  AS rot,
+      TRY_CAST(column07 AS FLOAT)                  AS sog,
+      TRY_CAST(column08 AS FLOAT)                  AS cog,
+      TRY_CAST(column09 AS SMALLINT)               AS heading,
+      TRY_CAST(column10 AS BIGINT)                 AS imo,
+      column11                                     AS callsign,
+      column12                                     AS name,
+      column13                                     AS ship_type,
+      column14                                     AS cargo_type,
+      TRY_CAST(column15 AS SMALLINT)               AS width,
+      TRY_CAST(column16 AS SMALLINT)               AS length,
+      column17                                     AS pos_fix_device,
+      TRY_CAST(column18 AS FLOAT)                  AS draught,
+      column19                                     AS destination,
+      try_strptime(column20, '%d/%m/%Y %H:%M:%S')  AS eta,
+      column21                                     AS data_source,
+      TRY_CAST(column22 AS SMALLINT)               AS dim_a,
+      TRY_CAST(column23 AS SMALLINT)               AS dim_b,
+      TRY_CAST(column24 AS SMALLINT)               AS dim_c,
+      TRY_CAST(column25 AS SMALLINT)               AS dim_d,
+      DATE '{day.isoformat()}'                     AS date
+    FROM {raw_csv(src)}
+    """
+
+
+def write_processed(source: Path, day: date, dest: Path) -> int:
+    """Write one day's DMA .zip or .csv as processed Parquet at `dest`, sorted by mmsi, ts,
+    and return its row count.
+
+    The file gets its name only when it is complete. Raises ValueError, and leaves no file,
+    when the source is empty or has a row whose timestamp is outside `day`."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    partial = dest.with_suffix(".parquet.partial")
+    with tempfile.TemporaryDirectory(dir=dest.parent, prefix=".tmp-") as tmp:
+        # File-backed so the sort of a full day (~25M rows) spills to disk next to the output.
+        con = duckdb.connect(os.path.join(tmp, "work.duckdb"))
+        apply_limits(con)
+        con.execute("SET enable_progress_bar = false; SET preserve_insertion_order = false")
+        with csv_source(source) as src:
+            con.execute(
+                f"COPY ({processed_layout_select(src, day)} ORDER BY mmsi, ts) TO '{partial}'"
+                " (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE 1000000)"
+            )
+        row = con.execute(
+            f"SELECT count(*), count(*) FILTER (ts::DATE IS DISTINCT FROM DATE '{day}')"
+            f" FROM read_parquet('{partial}')"
+        ).fetchone()
+        con.close()
+    rows, bad_day = row if row else (0, 0)
+    if not rows or bad_day:
+        partial.unlink()
+        problem = f"{bad_day} rows have a timestamp outside {day}" if rows else "no rows"
+        raise ValueError(f"{source}: {problem}")
+    partial.rename(dest)
+    return rows
 
 
 @contextmanager

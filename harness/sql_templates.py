@@ -1389,6 +1389,64 @@ def list_slow_then_fast(s: Sampler) -> Instance:
 
 V7_TEMPLATES = [slow_then_fast, list_slow_then_fast]
 
+# --- sql-v8: a moment -------------------------------------------------------------------
+# "How many ships were around Skagen at 12:00" got the hour 12:00-13:00: the plain counts in a
+# place all had a window (vessels_place_window, HH:00 to HH+1:00), and the 10-minute snapshot
+# came only with a status, speed or type filter. "The largest ship on the waters at 16:33" got
+# vessel_days, which has no time of day. Half the times are on the hour, where the window crept in.
+_AROUND = ["in {p}", "around {p}", "in the area around {p}"]
+_WHOLE_AREA = ["", " on the waters", " out at sea", " at sea", " in Danish waters"]
+_ONE_OF = {"Cargo": "cargo ship", "Fishing": "fishing vessel", "Passenger": "passenger ship",
+           "Tanker": "tanker"}
+
+
+def _moment(s: Sampler) -> str:
+    return f"{s.hour(0, 23):02d}:00" if s.rng.random() < 0.5 else _odd_time(s.rng)
+
+
+def vessels_place_moment(s: Sampler) -> Instance:
+    r = s.rng
+    d, hhmm = s.day(), _moment(s)
+    p = s.place(big=r.random() < 0.7)
+    t = s.ship_type() if r.random() < 0.3 else None
+    noun, tm = what(t)
+    pt, pm = place_text(p)
+    q = r.choice(["How many {n} were {w} at {t} on {d}?",
+                  "How many {n} were {w} at {t} UTC on {d}?",
+                  "On {d} at {t}, how many {n} were {w}?",
+                  "Count the {n} {w} at {t} UTC on {d}."]).format(
+        n=noun, w=r.choice(_AROUND).format(p=pt), t=hhmm, d=d_text(d, r))
+    sql = (f"SELECT count(DISTINCT mmsi) AS vessels FROM vessel_positions\n"
+           f"WHERE date = {d_sql(d)} AND {box_sql(p)}{type_clause(t)}\n"
+           f"  AND ts > {ts_sql(d, hhmm)} - INTERVAL 10 MINUTE AND ts <= {ts_sql(d, hhmm)}")
+    return Instance("vessels_place_moment", q, sql, [d_must(d), pm, hhmm_must(hhmm), *tm])
+
+
+def largest_at_moment(s: Sampler) -> Instance:
+    r = s.rng
+    d, hhmm = s.day(), _moment(s)
+    p = s.place(big=True) if r.random() < 0.4 else None
+    t = r.choice(list(_ONE_OF)) if r.random() < 0.3 else None
+    noun = _ONE_OF[t] if t else r.choice(["ship", "vessel"])
+    size = r.choice(["largest", "longest", "biggest"])
+    pt, pm = place_text(p) if p else ("", None)
+    where = f" in {pt}" if p else r.choice(_WHOLE_AREA)
+    q = r.choice(["Which {n} was the {a}{w} at {t} UTC on {d}?",
+                  "What was the {a} {n}{w} at {t} on {d}?",
+                  "At {t} on {d}, which {n} was the {a}{w}?"]).format(
+        n=noun, a=size, w=where, t=hhmm, d=d_text(d, r))
+    sql = (f"SELECT mmsi, arg_max(name, ts) AS name, max(length) AS length FROM vessel_positions\n"
+           f"WHERE date = {d_sql(d)}{' AND ' + box_sql(p) if p else ''}{type_clause(t)}\n"
+           f"  AND ts > {ts_sql(d, hhmm)} - INTERVAL 10 MINUTE AND ts <= {ts_sql(d, hhmm)}\n"
+           f"  AND length <= {MAX_REAL_LENGTH_M}\n"
+           f"GROUP BY mmsi ORDER BY length DESC, mmsi LIMIT 1")
+    must = [d_must(d), hhmm_must(hhmm), r"larg|long|big|great|size"]
+    return Instance("largest_at_moment", q, sql,
+                    must + ([pm] if pm else []) + ([SHIP_TYPES[t][1]] if t else []))
+
+
+V8_TEMPLATES = [vessels_place_moment, largest_at_moment]
+
 TEMPLATES = [
     vessels_on_day, vessels_type_day, vessels_window, vessels_place_window,
     vessels_place_type_range, vessels_every_day, daily_counts, hourly_counts_place,
@@ -1397,4 +1455,4 @@ TEMPLATES = [
     vessel_destination, vessel_static, vessel_distance, underway_type_at_time,
     status_at_time_place, status_share, near_vessel, closest_pair_place, long_ships,
     top_destinations, duplicate_share, non_vessel_rows,
-] + COMPOSITE_TEMPLATES + V5_TEMPLATES + V6_TEMPLATES + V7_TEMPLATES
+] + COMPOSITE_TEMPLATES + V5_TEMPLATES + V6_TEMPLATES + V7_TEMPLATES + V8_TEMPLATES

@@ -18,6 +18,7 @@ import re
 from datetime import date, datetime, timedelta
 
 import places
+from ais_tool import _DATES
 
 MAX_VESSELS = 200
 MAX_ROUTE_DAYS = 31  # the map's route view covers at most 31 days
@@ -33,10 +34,6 @@ _CAPS_RE = re.compile(r"\b([A-ZÆØÅ][A-ZÆØÅ0-9\-]+(?:\s+[A-ZÆØÅ0-9][A-Z�
 _NOT_NAMES = {"AIS", "UTC", "MMSI", "IMO", "US", "USA", "EU", "DK", "SQL", "HSC", "SAR", "ETA"}
 _MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august",
            "september", "october", "november", "december"]
-_TEXT_DATE_RE = re.compile(
-    r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(" + "|".join(_MONTHS) + r")\s+(\d{4})\b"
-    r"|\b(" + "|".join(_MONTHS) + r")\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b"
-    r"|\b(\d{4})-(\d{2})-(\d{2})\b", re.IGNORECASE)
 
 
 # Ship types named in the question (when no query ran, e.g. a map request), as on the map.
@@ -46,32 +43,69 @@ _TYPE_WORDS = [("Tanker", r"tanker"), ("Cargo", r"cargo|container|freighter"),
                ("Pleasure", r"pleasure|yacht|leisure"), ("Pilot", r"\bpilot"),
                ("Military", r"military|naval|navy|warship")]
 _UNSUPPORTED_RE = re.compile(r"\b(heat ?maps?|charts?|plots?|graphs?)\b", re.IGNORECASE)
-_RANGE_RE = re.compile(
-    r"\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:-|–|to|and|until)\s*(\d{1,2})(?:st|nd|rd|th)?\s+("
-    + "|".join(_MONTHS) + r")\s+(\d{4})\b", re.IGNORECASE)
+
+# Dates written out in a question, for map requests (no query ran). A day is 1-2 digits with an
+# optional st/nd/rd/th, not part of a clock time ("03:23 June 30" is 30 June); a month is its
+# name or a 3-letter short form; the year may be missing, e.g. "from August 2 to August 4 2026"
+# or "on 2 August": it is then the next year written in the question, else the previous one,
+# else the year the month falls in within the data.
+_MON = (r"(" + "|".join(_MONTHS)
+        + r"|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\.?")
+_DAY = r"(?<![\d:.])(\d{1,2})(?:st|nd|rd|th)?(?![\d:])"
+_YEAR = r"(?:,?\s+(\d{4})\b)?"
+_TO = r"\s*(?:-|–|to|and|until|till|through)\s*"
+_DATE_FORMS = [  # (pattern, kind), longest forms first; matched text is not read again
+    (re.compile(_DAY + _TO + _DAY + r"\s+(?:of\s+)?" + _MON + _YEAR, re.IGNORECASE), "d-d m"),
+    (re.compile(r"\b" + _MON + r"\s+" + _DAY + _TO + _DAY + _YEAR, re.IGNORECASE), "m d-d"),
+    (re.compile(_DAY + r"\s+(?:of\s+)?" + _MON + _YEAR, re.IGNORECASE), "d m"),
+    (re.compile(r"\b" + _MON + r"\s+(?:the\s+)?" + _DAY + _YEAR, re.IGNORECASE), "m d"),
+    (re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b"), "iso"),
+]
+
+
+def _month(name: str) -> int:
+    return next(i for i, m in enumerate(_MONTHS, 1) if m.startswith(name.lower().rstrip(".")[:3]))
+
+
+def _data_year(month: int) -> int:
+    """The year a month falls in within the data (1 October 2025 to 30 September 2026)."""
+    first, last = (date.fromisoformat(d) for d in (_DATES[0], _DATES[-1])) if _DATES else (
+        date(2025, 10, 1), date(2026, 9, 30))
+    return next((y for y in range(last.year, first.year - 1, -1)
+                 if (first.year, first.month) <= (y, month) <= (last.year, last.month)), last.year)
 
 
 def _text_dates(text: str) -> list[date]:
+    found, taken = [], []  # (position, year or None, month, days)
+    for pattern, kind in _DATE_FORMS:
+        for m in pattern.finditer(text):
+            if any(a < m.end() and m.start() < b for a, b in taken):
+                continue
+            g = m.groups()
+            if kind == "iso":
+                found.append((m.start(), int(g[0]), int(g[1]), [int(g[2])]))
+            elif kind == "d-d m":
+                found.append((m.start(), g[3] and int(g[3]), _month(g[2]), [int(g[0]), int(g[1])]))
+            elif kind == "m d-d":
+                found.append((m.start(), g[3] and int(g[3]), _month(g[0]), [int(g[1]), int(g[2])]))
+            elif kind == "d m":
+                found.append((m.start(), g[2] and int(g[2]), _month(g[1]), [int(g[0])]))
+            else:
+                found.append((m.start(), g[2] and int(g[2]), _month(g[0]), [int(g[1])]))
+            taken.append((m.start(), m.end()))
+    found.sort()
+    years = [(pos, y) for pos, y, _, _ in found if y]
     out = []
-    for m in _RANGE_RE.finditer(text):  # "from 1 to 3 March 2026": both days
-        month = _MONTHS.index(m.group(3).lower()) + 1
-        for d in (m.group(1), m.group(2)):
+    for pos, year, month, days in found:
+        if not year:
+            later = [y for p, y in years if p > pos]
+            earlier = [y for p, y in years if p < pos]
+            year = later[0] if later else earlier[-1] if earlier else _data_year(month)
+        for day in days:
             try:
-                out.append(date(int(m.group(4)), month, int(d)))
+                out.append(date(year, month, day))
             except ValueError:
                 continue
-    for m in _TEXT_DATE_RE.finditer(text):
-        try:
-            if m.group(1):
-                out.append(date(int(m.group(3)), _MONTHS.index(m.group(2).lower()) + 1,
-                                int(m.group(1))))
-            elif m.group(4):
-                out.append(date(int(m.group(6)), _MONTHS.index(m.group(4).lower()) + 1,
-                                int(m.group(5))))
-            else:
-                out.append(date(int(m.group(7)), int(m.group(8)), int(m.group(9))))
-        except ValueError:
-            continue
     return out
 
 
@@ -140,8 +174,10 @@ def map_hints(
         for p in places.mentioned(c.get("request") or "", known):
             named.setdefault(p.name, p)
 
+    # The dates the queries used; the question's own dates only when no query ran (a map
+    # request such as a route), so a year guessed from the text never widens a queried period.
     days = sorted({date.fromisoformat(d) for s in sqls for d in _DATE_RE.findall(s)}
-                  | set(_text_dates(read)))
+                  or set(_text_dates(read)))
     stamps = sorted(datetime.fromisoformat(f"{d}T{t if len(t) == 8 else t + ':00'}")
                     for s in sqls for d, t in _TS_RE.findall(s))
     start = end = at = None
