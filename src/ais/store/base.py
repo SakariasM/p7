@@ -6,6 +6,7 @@ from typing import Protocol
 
 from ais.models import (
     BBox,
+    Coverage,
     Route,
     Snapshot,
     Stops,
@@ -22,6 +23,10 @@ class DerivedDataMissing(RuntimeError):
 
 
 class AisStore(Protocol):
+    def coverage(self) -> Coverage:
+        """First and last day with cleaned positions."""
+        ...
+
     def vessel(self, mmsi: int) -> Vessel | None: ...
 
     def search_vessels(self, q: str, limit: int) -> list[VesselSummary]: ...

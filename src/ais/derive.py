@@ -29,6 +29,7 @@ from pathlib import Path
 
 import duckdb
 
+from ais.limits import apply_limits
 from ais.paths import DataPaths
 
 MAX_IMPLIED_KN = 50.0
@@ -275,6 +276,7 @@ def derive(
     with tempfile.TemporaryDirectory(dir=paths.root, prefix=".tmp-derive-") as tmp_str:
         tmp = Path(tmp_str)
         con = duckdb.connect(str(tmp / "work.duckdb"))
+        apply_limits(con)
         con.execute("SET enable_progress_bar = false")
         con.execute("INSTALL spatial; LOAD spatial")
         con.execute(MACROS)

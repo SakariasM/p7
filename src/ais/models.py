@@ -1,6 +1,6 @@
 """Typed records shared by the store and the API (and the OpenAPI contract)."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, Self
 
 from pydantic import BaseModel, Field, model_validator
@@ -29,6 +29,13 @@ class BBox(BaseModel):
     @property
     def area_deg2(self) -> float:
         return (self.max_lon - self.min_lon) * (self.max_lat - self.min_lat)
+
+
+class Coverage(BaseModel):
+    """The days the data covers. On the hosting machine a day is added every night."""
+
+    first_day: date
+    last_day: date
 
 
 class Vessel(BaseModel):

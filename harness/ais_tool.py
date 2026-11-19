@@ -13,6 +13,7 @@ import re
 import sys
 import threading
 import time
+from datetime import date
 from pathlib import Path
 
 import duckdb
@@ -21,9 +22,26 @@ PROJECT_DIR = Path(os.environ.get("P7_PROJECT_DIR", "/ceph/project/P7-Agent-Harn
 DATA_DIR = PROJECT_DIR / "data" / "processed" / "ais"
 PARQUET_GLOB = f"{DATA_DIR}/*/ais.parquet"
 
+# P7_LAST_DAY=YYYY-MM-DD leaves out every later day, in the list of days and in the views, as
+# if it had not been added yet. Evaluations set it (eval_sql.py) to the last day of the data
+# their reference answers were computed on: on the hosting machine a day is added every night
+# (scripts/ais_update.sh), and "currently" (the latest day) or a total over the whole data
+# would otherwise change with it.
+LAST_DAY_CAP = os.environ.get("P7_LAST_DAY") or None
+if LAST_DAY_CAP:
+    LAST_DAY_CAP = date.fromisoformat(LAST_DAY_CAP).isoformat()
+
+
+def _until_cap(keyword: str, column: str = "date") -> str:
+    """' WHERE date <= ...' or ' AND date <= ...' under P7_LAST_DAY, else nothing."""
+    return f" {keyword} {column} <= DATE '{LAST_DAY_CAP}'" if LAST_DAY_CAP else ""
+
+
 # Date coverage, read from the date=YYYY-MM-DD partition folders so the tool
 # description stays correct as more days are ingested.
-_DATES = sorted(p.parent.name.removeprefix("date=") for p in DATA_DIR.glob("date=*/ais.parquet"))
+_DATES = sorted(d for d in (p.parent.name.removeprefix("date=")
+                            for p in DATA_DIR.glob("date=*/ais.parquet"))
+                if not LAST_DAY_CAP or d <= LAST_DAY_CAP)
 DATE_RANGE = f"{_DATES[0]} through {_DATES[-1]}" if _DATES else "no dates (store is empty)"
 
 # Cleaned ship positions (clean_positions.py): ships in coverage, exact duplicates removed,
@@ -46,7 +64,7 @@ _NOT_SHIPS = ", ".join(str(s["mmsi"]) for s in json.loads(
 
 _VESSEL_POSITIONS = (
     f"SELECT * FROM read_parquet('{CLEAN_GLOB}', hive_partitioning=1)\n"
-    f"  WHERE mmsi NOT IN ({_NOT_SHIPS})" if USE_CLEAN else
+    f"  WHERE mmsi NOT IN ({_NOT_SHIPS}){_until_cap('AND')}" if USE_CLEAN else
     f"""SELECT * REPLACE (CASE WHEN sog >= 102.2 THEN NULL ELSE sog END AS sog) FROM ais
   WHERE mobile_type IN ('Class A', 'Class B')
     AND mmsi BETWEEN 200000000 AND 799999999
@@ -66,17 +84,21 @@ HAVE_VESSEL_DAYS = bool(_DATES) and set(_DATES) <= _VD_DATES
 # in Cuxhaven on a day without one). Such empty fields take the ship's usual value over the
 # year (build_vessel_days.py --static); a day's own value stays.
 VESSEL_STATIC_FILE = PROJECT_DIR / "data" / "derived" / "vessel_static" / "vessel_static.parquet"
+# Under P7_LAST_DAY the view reads vessel_static_<day>.parquet, a copy of the table kept from
+# when that day was the latest, if there is one: the table itself is rebuilt from all days.
+_STATIC_AS_OF = VESSEL_STATIC_FILE.with_name(f"vessel_static_{LAST_DAY_CAP}.parquet")
+_STATIC_READ = _STATIC_AS_OF if LAST_DAY_CAP and _STATIC_AS_OF.exists() else VESSEL_STATIC_FILE
 _VESSEL_DAYS = f"read_parquet('{VESSEL_DAYS_GLOB}', hive_partitioning=1)"
-if HAVE_VESSEL_DAYS and VESSEL_STATIC_FILE.exists():
+if HAVE_VESSEL_DAYS and _STATIC_READ.exists():
     _VESSEL_DAYS_VIEW = (
         "CREATE VIEW vessel_days AS SELECT d.* REPLACE (coalesce(d.name, s.name) AS name, "
         "coalesce(d.ship_type, s.ship_type) AS ship_type, coalesce(d.imo, s.imo) AS imo, "
         "coalesce(d.length, s.length) AS length, coalesce(d.width, s.width) AS width) "
-        f"FROM {_VESSEL_DAYS} d LEFT JOIN read_parquet('{VESSEL_STATIC_FILE}') s USING (mmsi) "
-        f"WHERE d.mmsi NOT IN ({_NOT_SHIPS});")
+        f"FROM {_VESSEL_DAYS} d LEFT JOIN read_parquet('{_STATIC_READ}') s USING (mmsi) "
+        f"WHERE d.mmsi NOT IN ({_NOT_SHIPS}){_until_cap('AND', 'd.date')};")
 elif HAVE_VESSEL_DAYS:
     _VESSEL_DAYS_VIEW = (f"CREATE VIEW vessel_days AS SELECT * FROM {_VESSEL_DAYS} "
-                         f"WHERE mmsi NOT IN ({_NOT_SHIPS});")
+                         f"WHERE mmsi NOT IN ({_NOT_SHIPS}){_until_cap('AND')};")
 else:
     _VESSEL_DAYS_VIEW = ""
 
@@ -110,7 +132,7 @@ CREATE MACRO haversine_m(lat1, lon1, lat2, lon2) AS
   2 * 6371008.8 * asin(sqrt(
       pow(sin(radians(lat2 - lat1) / 2), 2)
     + cos(radians(lat1)) * cos(radians(lat2)) * pow(sin(radians(lon2 - lon1) / 2), 2)));
-CREATE VIEW ais AS SELECT * FROM read_parquet('{PARQUET_GLOB}', hive_partitioning=1);
+CREATE VIEW ais AS SELECT * FROM read_parquet('{PARQUET_GLOB}', hive_partitioning=1){_until_cap('WHERE')};
 CREATE VIEW vessel_positions AS {_VESSEL_POSITIONS};
 {_VESSEL_DAYS_VIEW}
 """

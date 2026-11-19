@@ -30,6 +30,16 @@ $("legend").innerHTML = [...Object.entries(SHIP_COLORS), ["Other", OTHER_SHIP_CO
   .join("");
 $("type").innerHTML += SHIP_TYPES.map(type => `<option>${type}</option>`).join("");
 
+// The period with data grows by a day every night, so the pickers ask the server for it;
+// the limits written in index.html are only what shows until it answers.
+getJson("/coverage").then(({ first_day: first, last_day: last }) => {
+  Object.assign($("at"), { min: `${first}T00:00`, max: `${last}T23:59` });
+  for (const id of ["route-from", "route-to"]) Object.assign($(id), { min: first, max: last });
+  const month = day => new Date(`${day}T00:00Z`)
+    .toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+  $("period").textContent = `${month(first)}–${month(last)}`;
+}).catch(() => {});
+
 export function setHighlightedVessels(vessels) {
   highlightVersion++;
   highlightedVessels = new Set(vessels.map(vessel => Number(vessel.mmsi)));
