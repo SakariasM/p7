@@ -318,6 +318,32 @@ TYPE_SYNONYMS = {"ferry": "Passenger", "ferries": "Passenger", "cruise": "Passen
                  "freighter": "Cargo", "yacht": "Pleasure", "sailboat": "Sailing",
                  "trawler": "Fishing", "warship": "Military", "navy": "Military"}
 
+# Words the student was not trained on, as the words it was trained on. Measured on the
+# live-style test set: "visited" and "called at" were read as "present" (the group's definition
+# is docked), "on a typical day" as the month's total, and "ferries" once as Fishing. The
+# definitions written into its prompt did not change that (the student follows its training).
+_COUNTRIES = r"(?:Denmark|Sweden|Norway|Germany|Poland)"
+_PLAIN_WORDS = [
+    (rf"\b(?:visited|visits|visit|visiting)\b(?!\s+(?:the\s+)?{_COUNTRIES}\b)", "docked at"),
+    (r"\bcall(?:ed|s|ing)?\s+at\b", "docked at"),
+    (r"\bon an? (?:typical|normal|average|ordinary) day\b", "on average per day"),
+    (r"\bferries\b", "passenger ships"), (r"\bferry\b", "passenger ship"),
+    (r"\b(?:freighters|container ships)\b", "cargo ships"), (r"\b(?:freighter|container ship)\b", "cargo ship"),
+    (r"\bsailboats\b", "sailing ships"), (r"\bsailboat\b", "sailing ship"),
+    (r"\byachts?\b", "pleasure craft"),
+    (r"\btrawlers\b", "fishing vessels"), (r"\btrawler\b", "fishing vessel"),
+    (r"\boil tankers\b", "tankers"), (r"\boil tanker\b", "tanker"),
+    (r"\bwarships\b", "military ships"), (r"\bwarship\b", "military ship"),
+]
+
+
+def plain_words(request: str) -> str:
+    """'How many ferries visited Aarhus on a typical day ...' -> 'How many passenger ships docked
+    at Aarhus on average per day ...'. Visits to a country stay (they are port calls)."""
+    for pattern, words in _PLAIN_WORDS:
+        request = re.sub(pattern, words, request, flags=re.IGNORECASE)
+    return request
+
 
 def ask_data(student: OpenAI, request: str, session: list[places.Place] | None = None,
              model: str = STUDENT_MODEL) -> dict:
@@ -325,7 +351,7 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
     for the request; its prompt lists only the places the request names, including places
     accepted for this question. Unless the SQL uses an unexplained box or a value the data
     does not have, it runs through query_ais_data."""
-    request = spell_out(request)
+    request = plain_words(spell_out(request))
     named = places.mentioned(request, places.load() + (session or []))
     request = own_place_names(request, named)
     response = student.chat.completions.create(
