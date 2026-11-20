@@ -8,59 +8,91 @@
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css">
-  <link rel="stylesheet" href="/ui-assets/styles.css">
+  <link rel="stylesheet" href="/ui-assets/styles.css?v=chat-thread">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
   <script type="module" src="/ui-assets/main.js"></script>
 </head>
 <body>
   <main class="app-shell">
-    <aside class="sidebar">
-      <header class="brand">
-        <div class="brand-mark" aria-hidden="true">⌁</div>
-        <div>
-          <h1>AIS Explorer</h1>
-          <p>Danish waters · <span id="period">October 2025–September 2026</span> · UTC</p>
+    <section class="map-wrap" aria-label="Interactive vessel map">
+      <div id="map"></div>
+      <div class="map-tip">Draw an area, then ask a question to query that exact rectangle</div>
+      <div id="snap-status" class="map-data-status status" role="status">Loading ship positions…</div>
+    </section>
+    <aside class="chat-sidebar" aria-labelledby="assistant-heading">
+      <div class="chat-top">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">⌁</div>
+          <div>
+            <h1>AIS Explorer</h1>
+            <p>Danish waters · October 2025–September 2026 · UTC</p>
+          </div>
         </div>
+        <button id="map-settings-btn" class="secondary compact" type="button" aria-haspopup="dialog" aria-controls="map-settings" onclick="document.getElementById('map-settings').showModal()">Map settings</button>
+      </div>
+      <header class="chat-header">
+        <div><p class="eyebrow">Data assistant</p><h2 id="assistant-heading">Ask about ship activity</h2></div>
+        <span class="badge">AI</span>
       </header>
-
-      <section class="panel" aria-labelledby="assistant-heading">
-        <div class="panel-header">
-          <div><p class="eyebrow">Data assistant</p><h2 id="assistant-heading">Ask about ship activity</h2></div>
-          <span class="badge">AI</span>
+      <div id="chat-content" class="chat-content">
+        <div class="chat-examples" id="ask-examples">
+          <p>Suggested questions</p>
+          <button type="button">Which ships were docked in Skagen at 08:00 on 3 March 2026?</button>
+          <button type="button">Show the route of TYCHO BRAHE from 1 to 3 March 2026</button>
+        </div>
+        <div id="chat-thread" role="log" aria-label="Conversation" aria-relevant="additions text"></div>
+      </div>
+      <div class="chat-composer">
+        <div class="composer-tools">
+          <button id="draw-area-btn" class="secondary compact" type="button">Draw area</button>
+          <div id="selected-area-chip" class="area-chip" hidden>
+            <details>
+              <summary>Selected area</summary>
+              <p id="selected-area-coordinates" class="coordinates"></p>
+            </details>
+            <button id="clear-area-btn" type="button" aria-label="Remove selected area">×</button>
+          </div>
         </div>
         <label for="ask-q">Question</label>
-        <textarea id="ask-q" placeholder="How many tankers entered this area in March 2026?"></textarea>
-        <p class="helper" id="ask-examples">
-          Try <button class="link">Which ships were docked in Skagen at 08:00 on 3 March 2026?</button>
-          or <button class="link">Show the route of TYCHO BRAHE from 1 to 3 March 2026</button>.
-        </p>
-        <div class="area-card">
-          <div class="area-card-header">
-            <strong id="selected-area-summary">No exact area selected</strong>
-            <div>
-              <button id="draw-area-btn" class="secondary compact" type="button">Draw area</button>
-              <button id="clear-area-btn" class="link" type="button" hidden>Clear</button>
-            </div>
-          </div>
-          <p id="selected-area-coordinates" class="coordinates"></p>
-        </div>
+        <textarea id="ask-q" placeholder="Ask about a vessel, route, or area…"></textarea>
         <div class="button-row">
           <button id="ask-btn" type="button">Ask the data</button>
-          <button id="ask-clear" class="secondary compact" type="button">Reset</button>
+          <button id="ask-clear" class="secondary compact" type="button">Clear chat and view</button>
         </div>
         <div id="ask-status" class="status" role="status"></div>
-        <div id="ask-answer" class="answer" hidden></div>
-        <div id="ask-feedback" class="helper" hidden>
-          <span id="ask-fb-text">Was this answer right?</span>
-          <span id="ask-fb-buttons"><button class="link" id="ask-fb-yes" type="button">Yes</button> · <button class="link" id="ask-fb-no" type="button">No</button></span>
-          <div id="ask-fb-note" class="form-row" hidden>
-            <input id="ask-note" placeholder="What was wrong? (optional)">
-            <button id="ask-fb-send" class="compact" type="button">Send</button>
+      </div>
+    </aside>
+
+    <template id="chat-turn-template">
+      <article class="chat-turn">
+        <div class="chat-user" role="group" aria-label="Your question">
+          <p class="chat-question"></p>
+          <span class="chat-area-note" hidden>Selected area attached</span>
+        </div>
+        <div class="chat-reply" role="group" aria-label="Data assistant">
+          <p class="chat-turn-status status"></p>
+          <p class="answer" hidden></p>
+          <ul class="chat-vessels list"></ul>
+          <div class="chat-feedback helper" hidden>
+            <span class="feedback-text">Was this answer right?</span>
+            <span class="feedback-buttons"><button class="link feedback-yes" type="button">Yes</button> · <button class="link feedback-no" type="button">No</button></span>
+            <div class="feedback-form form-row" hidden>
+              <input aria-label="Feedback note" placeholder="What was wrong? (optional)">
+              <button class="compact" type="button">Send</button>
+            </div>
           </div>
         </div>
-        <ul id="ask-vessels" class="list"></ul>
-      </section>
+      </article>
+    </template>
+
+    <dialog id="map-settings" class="map-settings" aria-labelledby="map-settings-heading">
+      <header class="settings-header">
+        <h2 id="map-settings-heading">Map settings</h2>
+        <form method="dialog">
+          <button class="secondary compact" type="submit" autofocus>Close</button>
+        </form>
+      </header>
 
       <section class="panel" aria-labelledby="snapshot-heading">
         <div class="panel-header"><div><p class="eyebrow">Map snapshot</p><h2 id="snapshot-heading">Ships at a moment</h2></div></div>
@@ -78,7 +110,6 @@
           <span id="clear-filter" hidden> · <button class="link" data-name="" data-type="">Clear</button></span>
         </p>
         <div class="button-row"><button id="snap" type="button">Refresh ships in view</button></div>
-        <div id="snap-status" class="status" role="status"></div>
         <div id="legend" class="legend"></div>
       </section>
 
@@ -108,12 +139,7 @@
         <p class="eyebrow">Trips ±15 days</p>
         <ul id="trips" class="list"></ul>
       </section>
-    </aside>
-
-    <section class="map-wrap" aria-label="Interactive vessel map">
-      <div id="map"></div>
-      <div class="map-tip">Draw an area, then ask a question to query that exact rectangle</div>
-    </section>
+    </dialog>
   </main>
 </body>
 </html>
