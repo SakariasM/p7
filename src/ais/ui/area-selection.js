@@ -1,4 +1,5 @@
 import { $ } from "./shared.js";
+import { showMap } from "./sidebars.js";
 
 let selectedArea = null;
 let drawnRectangle = null;
@@ -66,6 +67,7 @@ export function initializeAreaSelection(map) {
   });
   map.on(L.Draw.Event.CREATED, event => useRectangle(event.layer));
   $("draw-area-btn").addEventListener("click", () => {
+    showMap();
     drawRectangle.enable();
     if (window.matchMedia("(max-width: 760px)").matches) {
       map.getContainer().scrollIntoView({ behavior: "smooth", block: "center" });

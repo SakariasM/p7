@@ -1,4 +1,5 @@
 import { getJson } from "./api-client.js";
+import { showSidebar, showMap } from "./sidebars.js";
 import {
   $, escapeHtml, formatTimestamp, OTHER_SHIP_COLOR, setStatus, SHIP_COLORS, SHIP_TYPES,
   shipColor, toIsoSeconds,
@@ -128,9 +129,7 @@ export function focusChatVessel(mmsi) {
   if (!marker) return false;
   map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 10), { duration: 0.8 });
   marker.openPopup();
-  if (window.matchMedia("(max-width: 760px)").matches) {
-    map.getContainer().scrollIntoView({ behavior: "smooth", block: "center" });
-  }
+  showMap();
   return true;
 }
 
@@ -196,7 +195,6 @@ export async function loadSnapshot({ area } = {}) {
   }
 }
 
-const settings = $("map-settings");
 $("snap").addEventListener("click", () => loadSnapshot());
 $("presets").addEventListener("click", event => {
   const button = event.target.closest("button");
@@ -270,7 +268,7 @@ export async function selectVessel(mmsi) {
   }
 }
 export function openVesselDetails(mmsi) {
-  if (!settings.open) settings.showModal();
+  showSidebar("controls");
   selectVessel(mmsi);
 }
 window.openVesselDetails = openVesselDetails;
