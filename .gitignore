@@ -16,7 +16,7 @@ data/*.parquet
 data/*.zip
 data/*.duckdb
 data/*.duckdb.wal
-
+harness/eval
 .DS_Store
 
 # Cluster project folder (/ceph/project/P7-Agent-Harness): never commit these

@@ -96,6 +96,7 @@ _LIMIT_RE = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)(?=\s*(?:m|meters?|metres?|kno
 _TOKEN_RE = re.compile(r"qq([a-z]+)(\d+)qq")
 _SLOT_RE = re.compile(r"\{([a-z]+\d+)(?:\.([a-z_]+))?\}")
 _QUOTED_RE = re.compile(r"'([^']*)'")
+_DAY_BOUND_RE = re.compile(r"00:00(:00)?|23:59(:59(\.\d+)?)?")  # whole days move with the date
 _BOX_KEYS = ("lon_min", "lat_min", "lon_max", "lat_max")
 
 
@@ -318,6 +319,12 @@ def sql_skeleton(sql: str, values: dict[str, object]) -> tuple[str | None, str]:
             return None, f"{name} not found in the SQL"
     if re.search(r"\d{4}-\d{2}-\d{2}", out):
         return None, "a date in the SQL that is not in the question"
+    if any(k.startswith("time") for k in values) and any(
+            _TIME_RE.search(lit) and not _DAY_BOUND_RE.fullmatch(lit.split()[-1])
+            for lit in _QUOTED_RE.findall(out)):
+        # "at 12:00" written as 12:00 to 13:00 would keep 13:00 for any other time
+        # ("around noon" has no slot: its fixed 12:00 to 13:00 holds for any date)
+        return None, "a time in the SQL that is not in the question"
     if places.boxes_in_sql(out):
         return None, "a box in the SQL that is not a place in the question"
     known = {p.name.lower() for p in places.load()}

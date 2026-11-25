@@ -40,6 +40,7 @@ import argparse
 import itertools
 import json
 import math
+import os
 import re
 import sys
 import time
@@ -51,9 +52,16 @@ try:
 except ModuleNotFoundError:  # Python < 3.11 on the login node
     import tomli as tomllib
 
-import llm_usage
-import places
-from ais_tool import QUERY_TIMEOUT_SECONDS, extract_sql, query_ais_data, schema_context
+# The reference answers (eval/) were computed on the year 2025-10-01..2026-09-30. The hosting
+# machine adds a day every night (scripts/ais_update.sh), so every evaluation reads the data as
+# if it still ended there: before ais_tool is imported, and inherited by the processes an
+# evaluation starts (eval_baseline.py). After computing reference answers on more days, change
+# the day here; P7_LAST_DAY in the environment wins.
+os.environ.setdefault("P7_LAST_DAY", "2026-09-30")
+
+import llm_usage  # noqa: E402
+import places  # noqa: E402
+from ais_tool import QUERY_TIMEOUT_SECONDS, extract_sql, query_ais_data, schema_context  # noqa: E402
 
 HERE = Path(__file__).parent
 EVAL_DIR = HERE / "eval"

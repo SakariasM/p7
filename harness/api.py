@@ -53,9 +53,10 @@ class SelectedArea(BaseModel):
         return self
 
     def add_to_question(self, question: str) -> str:
+        # "map" here makes run_routed classify count questions as visualisation requests.
         return (
             f"{question}\n\n"
-            "Use the exact map rectangle selected by the user for this question. "
+            "Use the exact rectangle selected by the user for this question. "
             f"Its west longitude is {self.west:.6f}, south latitude is {self.south:.6f}, "
             f"east longitude is {self.east:.6f}, and north latitude is {self.north:.6f}. "
             "Include every position inside or on this rectangle. This rectangle overrides any "

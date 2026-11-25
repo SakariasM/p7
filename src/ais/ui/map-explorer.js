@@ -1,4 +1,5 @@
 import { getJson } from "./api-client.js";
+import { showSidebar, showMap } from "./sidebars.js";
 import {
   $, escapeHtml, formatTimestamp, OTHER_SHIP_COLOR, setStatus, SHIP_COLORS, SHIP_TYPES,
   shipColor, toIsoSeconds,
@@ -9,6 +10,10 @@ let highlightedVessels = new Set();
 let currentVessel = null;
 let searchTimer;
 let player = null;
+let highlightVersion = 0;
+let routeVersion = 0;
+const snapshotMarkers = new Map();
+const chatMarkers = new Map();
 
 export const map = L.map("map", { preferCanvas: true, zoomControl: false }).setView([56.0, 11.0], 7);
 L.control.zoom({ position: "bottomright" }).addTo(map);
@@ -19,14 +24,123 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
 
 const shipsLayer = L.layerGroup().addTo(map);
 const pathLayer = L.layerGroup().addTo(map);
+const chatLayer = L.layerGroup().addTo(map);
 
 $("legend").innerHTML = [...Object.entries(SHIP_COLORS), ["Other", OTHER_SHIP_COLOR]]
   .map(([label, color]) => `<span><i class="dot" style="background:${color}"></i>${label}</span>`)
   .join("");
 $("type").innerHTML += SHIP_TYPES.map(type => `<option>${type}</option>`).join("");
 
+// The period with data grows by a day every night, so the pickers ask the server for it;
+// the limits written in index.html are only what shows until it answers.
+getJson("/coverage").then(({ first_day: first, last_day: last }) => {
+  Object.assign($("at"), { min: `${first}T00:00`, max: `${last}T23:59` });
+  for (const id of ["route-from", "route-to"]) Object.assign($(id), { min: first, max: last });
+  const month = day => new Date(`${day}T00:00Z`)
+    .toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+  $("period").textContent = `${month(first)}–${month(last)}`;
+}).catch(() => {});
+
 export function setHighlightedVessels(vessels) {
-  highlightedVessels = new Set(vessels.map(vessel => vessel.mmsi));
+  highlightVersion++;
+  highlightedVessels = new Set(vessels.map(vessel => Number(vessel.mmsi)));
+  chatLayer.clearLayers();
+  chatMarkers.clear();
+  for (const { marker, vessel, normalRadius } of snapshotMarkers.values()) {
+    styleSnapshotMarker(marker, vessel, normalRadius);
+  }
+}
+
+function styleSnapshotMarker(marker, vessel, normalRadius, highlighted = highlightedVessels.has(Number(vessel.mmsi))) {
+  marker.setStyle({
+    radius: highlighted ? 9 : normalRadius,
+    weight: highlighted ? 3 : 1,
+    color: highlighted ? "#115e59" : "#ffffff",
+    fillColor: highlighted ? "#facc15" : shipColor(vessel.ship_type),
+    fillOpacity: highlightedVessels.size && !highlighted ? 0.2 : 0.92,
+  });
+  marker.unbindTooltip();
+  if (highlighted) {
+    marker.bindTooltip(escapeHtml(vessel.name || `MMSI ${vessel.mmsi}`), {
+      permanent: true, direction: "top", className: "chat-vessel-label",
+    });
+    marker.bringToFront();
+  }
+}
+
+export async function highlightChatVessels(vessels, { start, end, boxes = [] } = {}) {
+  setHighlightedVessels(vessels);
+  const version = highlightVersion;
+  const periodEnd = new Date(`${end || selectedTimestamp()}Z`);
+  const periodStart = start ? new Date(`${start}Z`) : new Date(periodEnd - DAY_MS);
+  const insideArea = point => !boxes.length || boxes.some(([west, south, east, north]) =>
+    point.lon >= west && point.lon <= east && point.lat >= south && point.lat <= north);
+  const pending = [];
+  for (const vessel of vessels) {
+    const existing = snapshotMarkers.get(Number(vessel.mmsi));
+    const timestamp = existing && new Date(`${existing.vessel.ts}Z`);
+    if (existing && timestamp >= periodStart && timestamp < periodEnd && insideArea(existing.vessel)) {
+      chatMarkers.set(Number(vessel.mmsi), existing.marker);
+    } else {
+      if (existing) styleSnapshotMarker(existing.marker, existing.vessel, existing.normalRadius, false);
+      pending.push(vessel);
+    }
+  }
+
+  // Use reported positions from the answer's period when its ships aren't in the snapshot.
+  async function locate(vessel) {
+    // Match the map's existing 31-day route limit and bound historical lookups.
+    if (periodEnd - periodStart > 31 * DAY_MS) return;
+    let windowEnd = periodEnd;
+    while (windowEnd > periodStart && version === highlightVersion) {
+      const windowStart = new Date(Math.max(+periodStart, windowEnd - DAY_MS));
+      const track = await getJson(`/vessels/${vessel.mmsi}/track`, {
+        start: toIsoSeconds(windowStart), end: toIsoSeconds(windowEnd), max_points: 5000,
+      });
+      if (version !== highlightVersion) return;
+      const point = track.points.findLast(insideArea);
+      if (point) {
+        const name = escapeHtml(vessel.name || `MMSI ${vessel.mmsi}`);
+        const marker = L.circleMarker([point.lat, point.lon], {
+          radius: 9, weight: 3, color: "#115e59", fillColor: "#facc15", fillOpacity: 1,
+        }).bindTooltip(name, {
+          permanent: true, direction: "top", className: "chat-vessel-label",
+        }).bindPopup(
+          `<b>${name}</b><br>MMSI ${vessel.mmsi}<br>Reported ${formatTimestamp(point.ts)} UTC<br>`
+          + `<button onclick="openVesselDetails(${Number(vessel.mmsi)})">Details &amp; trips</button>`,
+        ).addTo(chatLayer);
+        chatMarkers.set(Number(vessel.mmsi), marker);
+        return;
+      }
+      windowEnd = windowStart;
+    }
+  }
+
+  async function worker() {
+    while (pending.length && version === highlightVersion) {
+      const vessel = pending.shift();
+      try {
+        await locate(vessel);
+      } catch {
+        // The reply remains usable when one vessel has no accessible position data.
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, pending.length) }, worker));
+  if (version === highlightVersion && chatMarkers.size) {
+    const bounds = L.latLngBounds([...chatMarkers.values()].map(marker => marker.getLatLng()));
+    if (!map.getBounds().contains(bounds)) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 });
+  }
+  return { located: chatMarkers.size, total: vessels.length };
+}
+
+export function focusChatVessel(mmsi) {
+  const marker = chatMarkers.get(Number(mmsi));
+  if (!marker) return false;
+  map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 10), { duration: 0.8 });
+  marker.openPopup();
+  showMap();
+  return true;
 }
 
 export function showActiveFilters() {
@@ -38,18 +152,19 @@ function selectedTimestamp() {
   return value.length === 16 ? `${value}:00` : value;
 }
 
-export async function loadSnapshot() {
+export async function loadSnapshot({ area } = {}) {
   const bounds = map.getBounds();
   const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
   const bbox = [
     clamp(bounds.getWest(), -180, 180), clamp(bounds.getSouth(), -90, 90),
     clamp(bounds.getEast(), -180, 180), clamp(bounds.getNorth(), -90, 90),
   ].map(value => value.toFixed(4)).join(",");
+  const at = selectedTimestamp();
   $("snap").disabled = true;
-  setStatus("snap-status", "Loading ships…");
+  setStatus("snap-status", `Loading ships · ${formatTimestamp(at)} UTC`);
   const started = performance.now();
   try {
-    const params = { at: selectedTimestamp(), lookback_min: $("lookback").value, bbox };
+    const params = { at, lookback_min: $("lookback").value, bbox: area?.join(",") ?? bbox };
     const name = $("name").value.trim();
     const type = $("type").value;
     if (name) params.name = name;
@@ -57,9 +172,10 @@ export async function loadSnapshot() {
     const snapshot = await getJson("/snapshot", params);
     const filtered = Boolean(name || type);
     shipsLayer.clearLayers();
+    snapshotMarkers.clear();
     for (const vessel of snapshot.items) {
       const highlighted = highlightedVessels.has(vessel.mmsi);
-      L.circleMarker([vessel.lat, vessel.lon], {
+      const marker = L.circleMarker([vessel.lat, vessel.lon], {
         radius: highlighted ? 8 : filtered ? 6 : 4,
         weight: highlighted ? 3 : 1,
         color: highlighted ? "#14201f" : "#ffffff",
@@ -69,15 +185,18 @@ export async function loadSnapshot() {
         <b>${escapeHtml(vessel.name || "Unknown name")}</b><br>
         ${escapeHtml(vessel.ship_type || "Unknown type")} · MMSI ${vessel.mmsi}<br>
         ${vessel.sog != null ? `${vessel.sog.toFixed(1)} kn` : "speed –"} · seen ${formatTimestamp(vessel.ts)}<br>
-        <button onclick="selectVessel(${vessel.mmsi})">Details &amp; trips</button>`)
+        <button onclick="openVesselDetails(${vessel.mmsi})">Details &amp; trips</button>`)
         .addTo(shipsLayer);
+      const normalRadius = filtered ? 6 : 4;
+      snapshotMarkers.set(Number(vessel.mmsi), { marker, vessel, normalRadius });
+      styleSnapshotMarker(marker, vessel, normalRadius);
     }
     const seconds = ((performance.now() - started) / 1000).toFixed(1);
     const filterLabel = [name && `named “${name}”`, type].filter(Boolean).join(", ");
     const capped = snapshot.truncated ? " · capped at 5,000; zoom in" : "";
     setStatus(
       "snap-status",
-      `${snapshot.items.length.toLocaleString()} ships${filterLabel ? ` · ${filterLabel}` : ""}${capped} · ${seconds}s`,
+      `${snapshot.items.length.toLocaleString()} ships · ${formatTimestamp(at)} UTC${filterLabel ? ` · ${filterLabel}` : ""}${capped} · ${seconds}s`,
     );
   } catch (error) {
     setStatus("snap-status", error.message, true);
@@ -86,7 +205,7 @@ export async function loadSnapshot() {
   }
 }
 
-$("snap").addEventListener("click", loadSnapshot);
+$("snap").addEventListener("click", () => loadSnapshot());
 $("presets").addEventListener("click", event => {
   const button = event.target.closest("button");
   if (!button) return;
@@ -158,12 +277,14 @@ export async function selectVessel(mmsi) {
     setStatus("vessel-status", error.message, true);
   }
 }
-window.selectVessel = selectVessel;
+export function openVesselDetails(mmsi) {
+  showSidebar("controls");
+  selectVessel(mmsi);
+}
+window.openVesselDetails = openVesselDetails;
 
 function drawTrack(latlngs, label) {
-  pathLayer.clearLayers();
-  stopPlayer();
-  $("route-legend").hidden = true;
+  clearRoute();
   if (latlngs.length < 2) {
     setStatus("vessel-status", "Not enough points to draw", true);
     return;
@@ -180,19 +301,24 @@ $("trips").addEventListener("click", async event => {
   if (!item) return;
   document.querySelectorAll("#trips li.active").forEach(element => element.classList.remove("active"));
   item.classList.add("active");
+  clearRoute();
+  const version = routeVersion;
   try {
     const geometry = await getJson(`/trips/${encodeURIComponent(item.dataset.trip)}/geometry`);
+    if (version !== routeVersion) return;
     drawTrack(
       geometry.geometry.coordinates.map(([longitude, latitude]) => [latitude, longitude]),
       `Trip drawn · ${geometry.geometry.coordinates.length} points`,
     );
   } catch (error) {
-    setStatus("vessel-status", error.message, true);
+    if (version === routeVersion) setStatus("vessel-status", error.message, true);
   }
 });
 
 $("track-btn").addEventListener("click", async () => {
   if (!currentVessel) return;
+  clearRoute();
+  const version = routeVersion;
   const at = new Date(`${selectedTimestamp()}Z`);
   const halfDay = 12 * 3_600_000;
   try {
@@ -200,19 +326,26 @@ $("track-btn").addEventListener("click", async () => {
       start: toIsoSeconds(new Date(at - halfDay)),
       end: toIsoSeconds(new Date(+at + halfDay)),
     });
+    if (version !== routeVersion) return;
     const downsampled = track.downsampled ? ` · showing ${track.points.length}` : "";
     drawTrack(track.points.map(point => [point.lat, point.lon]), `24 h track · ${track.total_points.toLocaleString()} positions${downsampled}`);
   } catch (error) {
-    setStatus("vessel-status", error.message, true);
+    if (version === routeVersion) setStatus("vessel-status", error.message, true);
   }
 });
 
-$("clear-btn").addEventListener("click", () => {
+export function clearRoute() {
+  routeVersion++;
   pathLayer.clearLayers();
   stopPlayer();
+  map.stop();
+  map.closePopup();
   $("route-legend").hidden = true;
+  $("route-btn").disabled = false;
   setStatus("vessel-status", "");
-});
+}
+
+$("clear-btn").addEventListener("click", clearRoute);
 
 const timeColor = fraction => `hsl(${200 + 145 * fraction} ${80 - 10 * Math.sin(Math.PI * fraction)}% ${55 - 10 * fraction}%)`;
 const formatDuration = seconds => seconds >= 86_400 ? `${(seconds / 86_400).toFixed(1)} days` : `${(seconds / 3600).toFixed(1)} h`;
@@ -321,16 +454,29 @@ $("route-btn").addEventListener("click", async () => {
     setStatus("vessel-status", "A route can cover at most 31 days", true);
     return;
   }
+  try {
+    await loadVesselRoute(currentVessel, start, end);
+  } catch (error) {
+    setStatus("vessel-status", error.message, true);
+  }
+});
+
+export async function loadVesselRoute(mmsi, start, end) {
+  if (!Number.isFinite(+start) || !Number.isFinite(+end) || end <= start) {
+    throw new Error("Pick a valid route period");
+  }
+  if (end - start > 31 * DAY_MS) throw new Error("A route can cover at most 31 days");
+  clearRoute();
+  const version = routeVersion;
   $("route-btn").disabled = true;
   setStatus("vessel-status", "Loading route…");
   try {
-    const route = await getJson(`/vessels/${currentVessel}/route`, { start: toIsoSeconds(start), end: toIsoSeconds(end) });
-    pathLayer.clearLayers();
-    stopPlayer();
+    const route = await getJson(`/vessels/${mmsi}/route`, { start: toIsoSeconds(start), end: toIsoSeconds(end) });
+    if (version !== routeVersion) return null;
     if (!route.legs.length) {
       setStatus("vessel-status", "No trips in this range");
       $("route-legend").hidden = true;
-      return;
+      return route;
     }
     const span = end - start;
     const bounds = L.latLngBounds([]);
@@ -357,12 +503,14 @@ $("route-btn").addEventListener("click", async () => {
     const nauticalMiles = route.legs.reduce((sum, leg) => sum + leg.distance_m, 0) / 1852;
     const capped = route.truncated ? " · capped at 2,000 trips; shorten the range" : "";
     setStatus("vessel-status", `${route.legs.length} trips · ${Math.round(nauticalMiles).toLocaleString()} nm · ${route.stops.length} stops${capped}`);
+    return route;
   } catch (error) {
-    setStatus("vessel-status", error.message, true);
+    if (version !== routeVersion) return null;
+    throw error;
   } finally {
-    $("route-btn").disabled = false;
+    if (version === routeVersion) $("route-btn").disabled = false;
   }
-});
+}
 
 export function flyTo(bounds) {
   return new Promise(resolve => {
