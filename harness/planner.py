@@ -362,6 +362,7 @@ def spell_out(request: str) -> str:
         last = (date(year + (i == 12), i % 12 + 1, 1) - timedelta(days=1)).day
         name = _MONTH_NAMES[i - 1]
         return f"from 1 {name} {year} to {last} {name} {year}"
+    request = numeric_dates(request)
     request = _DANISH_WATERS_RE.sub("", _IN_MONTH_RE.sub(month, request))
     # "Copenhagen, October 2026": a month with its year but no "in" (the student queried 2025)
     request = with_years(_MONTH_WITH_YEAR_RE.sub(month, request))
@@ -380,6 +381,46 @@ _DAY_NO_YEAR_RE = re.compile(
     r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(" + _FULL_MONTHS_RE + r")\b(?!\s*,?\s*\d{4})"
     r"|\b(" + _FULL_MONTHS_RE + r")\s+(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\b(?![:\d])(?!\s*,?\s*\d{4})",
     re.IGNORECASE)
+
+
+# "20/11/2026", "20.11.2026", "20-11-2026", "10/03/26", "2026/11/20", and without a year only
+# with a slash ("10/03"): a dot or dash without a year is a time, decimal or range.
+_NUMERIC_DATE_RE = re.compile(
+    r"(?<![\w./:-])(?:(\d{4})/(\d{1,2})/(\d{1,2})"
+    r"|(\d{1,2})([./-])(\d{1,2})\5(\d{4}|\d{2})"
+    r"|(\d{1,2})/(\d{1,2}))(?![\w/:-]|\.\d)")
+
+
+_DATE_WORDS = {"on", "from", "to", "until", "till", "since", "between", "and", "by", "before",
+               "after", "of"}
+
+
+def numeric_dates(text: str) -> str:
+    """Numeric dates in words: "20/11/2026" -> "20 November 2026". The student wrote its
+    training year for them and read 10/03/2026 as 3 October ("tankers docked in Fredericia on
+    10/03/2026" queried 3 October 2025; "20/11/2026" queried 20 November 2025 and the answer
+    said 2026), and fix_years only knows dates with month names. Day/month as in Denmark;
+    month/day only when day/month is no date (09/15/2026). A day without a year then gets its
+    year from with_years. Anything that is no date stays."""
+    def words(m: re.Match) -> str:
+        if m.group(1):
+            year, first, second = int(m.group(1)), int(m.group(3)), int(m.group(2))
+        elif m.group(4):
+            year = int(m.group(7)) + (2000 if len(m.group(7)) == 2 else 0)
+            first, second = int(m.group(4)), int(m.group(6))
+        else:  # no year: only after a date word ("on 10/03"), not "1/2 of the ships"
+            before = m.string[:m.start()].split()
+            if not before or before[-1].lower() not in _DATE_WORDS:
+                return m.group(0)
+            year, first, second = None, int(m.group(8)), int(m.group(9))
+        for day, month in ((first, second), (second, first)):
+            try:
+                date(year or 2024, month, day)  # 2024: a leap year, so 29/02 is a date
+            except ValueError:
+                continue
+            return f"{day} {_MONTH_NAMES[month - 1]}" + (f" {year}" if year else "")
+        return m.group(0)
+    return _NUMERIC_DATE_RE.sub(words, text)
 
 
 def with_years(request: str) -> str:
@@ -1294,6 +1335,7 @@ def run_routed(question: str, max_turns: int = 10, enable_thinking: bool = False
 def _run_routed(question: str, max_turns: int, enable_thinking: bool, return_trace: bool,
                 map_view: bool):
     asked = question
+    question = numeric_dates(question)  # the router, planner and answer see the day it means
     question, relative_note = resolve_relative(question)
     question = bridges_named(question)
     period_reply, note = period_problem(question)
