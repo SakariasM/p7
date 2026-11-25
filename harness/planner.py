@@ -193,10 +193,20 @@ def find_place(name: str, session: list[places.Place]) -> dict:
     if places.normalise(name) in DANISH_WATERS:
         return {"name": "Danish waters", "note": "the whole data area: send requests without "
                 "any place, e.g. 'How many tankers were seen from 1 to 31 May 2026?'"}
+    if places.normalise(name) in _NOT_PLACES:
+        # "how many nautical miles did STENA SUNRISE sail in may?" looked up May as a place
+        return {"unknown": name, "note": f"'{name}' is a time, not a place: use it as the date "
+                "or period of the request and name no place unless the question has one"}
     place = places.find(name, places.load() + session)
     if place is None:
         return {"unknown": name, "next": "you may call propose_place once for it"}
     return place.as_dict()
+
+
+_NOT_PLACES = {m.lower() for m in ["January", "February", "March", "April", "May", "June", "July",
+                                   "August", "September", "October", "November", "December",
+                                   "Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+                                   "Saturday", "Sunday", "today", "yesterday", "tomorrow"]}
 
 
 def propose_place(args: dict, question: str, session: list[places.Place],
@@ -309,9 +319,42 @@ def spell_out(request: str) -> str:
         name = _MONTH_NAMES[i - 1]
         return f"from 1 {name} {year} to {last} {name} {year}"
     request = _DANISH_WATERS_RE.sub("", _IN_MONTH_RE.sub(month, request))
+    # "Copenhagen, October 2026": a month with its year but no "in" (the student queried 2025)
+    request = with_years(_MONTH_WITH_YEAR_RE.sub(month, request))
     # "in the AIS data" means the dataset; the student read it as the raw ais table (which
     # times out over the year) - that table is only for questions about raw data quality.
     return _AIS_DATA_RE.sub("the data", request)
+
+
+_FULL_MONTHS_RE = "|".join(_MONTH_NAMES)
+# a month and its year, not after a day ("3 October 2026", "3rd of October 2026" are days)
+_MONTH_WITH_YEAR_RE = re.compile(
+    r"(?<!\d )(?<!\d)(?<!st )(?<!nd )(?<!rd )(?<!th )(?<!of )\b(" + _FULL_MONTHS_RE + r")\s+(\d{4})\b",
+    re.IGNORECASE)
+# a day without a year: "3 November", "the 3rd of November", "November 3rd"
+_DAY_NO_YEAR_RE = re.compile(
+    r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(" + _FULL_MONTHS_RE + r")\b(?!\s*,?\s*\d{4})"
+    r"|\b(" + _FULL_MONTHS_RE + r")\s+(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\b(?![:\d])(?!\s*,?\s*\d{4})",
+    re.IGNORECASE)
+
+
+def with_years(request: str) -> str:
+    """A day without a year gets the latest year the data has that day in: "3 November" is
+    3 November 2026 while the data runs to November 2026 (the student wrote 2025, the year it
+    was trained on), as the map reads it (map_hints). A day the data does not have stays."""
+    def year(m: re.Match) -> str:
+        day, name = (m.group(1), m.group(2)) if m.group(1) else (m.group(4), m.group(3))
+        i = [n.lower() for n in _MONTH_NAMES].index(name.lower()) + 1
+        for y in range(LAST_DAY.year, FIRST_DAY.year - 1, -1):
+            try:
+                if FIRST_DAY <= date(y, i, int(day)) <= LAST_DAY:
+                    return f"{m.group(0)} {y}"
+            except ValueError:
+                return m.group(0)
+        return m.group(0)
+    if re.search(r"\b(19|20)\d{2}\b", request):  # "from August 2nd to 4th 2026" has its year
+        return request
+    return _DAY_NO_YEAR_RE.sub(year, request)
 
 
 # Words for ship types that are not AIS values, and the value that covers them.
@@ -348,11 +391,13 @@ def plain_words(request: str) -> str:
 
 
 def ask_data(student: OpenAI, request: str, session: list[places.Place] | None = None,
-             model: str = STUDENT_MODEL) -> dict:
+             model: str = STUDENT_MODEL, question: str = "") -> dict:
     """The SQL writer (the student, or with model=MODEL_PATH the 8B, for comparison) writes SQL
     for the request; its prompt lists only the places the request names, including places
     accepted for this question. Unless the SQL uses an unexplained box or a value the data
-    does not have, it runs through query_ais_data."""
+    does not have, it runs through query_ais_data. question is the user's question when the
+    planner wrote the request: a unit it asks for (nautical miles) holds even if the request
+    leaves it out."""
     request = plain_words(spell_out(request))
     named = places.mentioned(request, places.load() + (session or []))
     request = own_place_names(request, named)
@@ -365,7 +410,8 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
     written = cap_lengths(extract_sql(response.choices[0].message.content))
-    sql = fix_years(written, request)
+    sql = fix_distance(fix_place_lists(fix_years(written, request)),
+                       bool(_NAUTICAL_RE.search(f"{request} {question}")))
     stray = places.unexplained_boxes(sql, named, request)
     bad = invalid_values(sql)
     unknown = unknown_list_places(sql)
@@ -437,6 +483,57 @@ def cap_lengths(sql: str) -> str:
     SANTANDER at 436 m)."""
     return _LENGTH_FLOOR_RE.sub(
         lambda m: f"{m.group(1)}{m.group(2)} AND {m.group(1)}length <= {MAX_REAL_LENGTH_M}", sql)
+
+
+_PLACES_AND_ANY_RE = re.compile(
+    r"list_contains\(\s*places\s*,\s*('(?:[^']|'')*')\s*\)\s+AND\s+(moving_in|still_in)"
+    r"\s+IS\s+NOT\s+NULL"
+    r"|(moving_in|still_in)\s+IS\s+NOT\s+NULL\s+AND\s+list_contains\(\s*places\s*,\s*"
+    r"('(?:[^']|'')*')\s*\)", re.IGNORECASE)
+
+
+def fix_place_lists(sql: str) -> str:
+    """`list_contains(places, 'X') AND moving_in IS NOT NULL` is a ship in X that moved
+    anywhere that day; the question means moving in X, `list_contains(moving_in, 'X')` (as the
+    student wrote for Aarhus). "Mean daily number of moving ships in Esbjerg" gave 84.4, the
+    ships present, instead of 27.7. The same for still_in."""
+    return _PLACES_AND_ANY_RE.sub(
+        lambda m: f"list_contains({m.group(2) or m.group(3)}, {m.group(1) or m.group(4)})", sql)
+
+
+_NAUTICAL_RE = re.compile(r"\bnautical\s+miles?\b|\bsea\s*miles?\b|\bnmi?\b", re.IGNORECASE)
+_DISTANCE_SUM_RE = re.compile(
+    r"sum\(haversine_m\(prev_lat,\s*prev_lon,\s*lat,\s*lon\)\)\s*/\s*(1000|1852)(?:\.0*)?"
+    r"\s+AS\s+\w+", re.IGNORECASE)
+_UNORDERED_LAG_RE = re.compile(r"OVER\s*\(\s*ORDER\s+BY\s+ts\s*\)", re.IGNORECASE)
+_INNER_SELECT_RE = re.compile(r"SELECT\s+lat,\s*lon,\s*(?=lag\()", re.IGNORECASE)
+_PREV_LON_RE = re.compile(r"\bAS\s+prev_lon\b", re.IGNORECASE)
+MAX_STEP_SQL = "INTERVAL 1 HOUR"  # as distance_km in build_vessel_days.py
+
+
+def fix_distance(sql: str, nautical: bool = False) -> str:
+    """The student's distance query (vessel_distance in sql_templates.py) sums the steps between
+    reports in time order. Over a month it also summed straight lines across gaps in coverage
+    and, with two ships of one name, steps between them: STENA SUNRISE in May 2026 came to
+    652 km, distance_km (steps at most an hour apart, per vessel) to 487 km. The query gets the
+    same steps as distance_km, and the column says its unit; with nautical=True (the question
+    asks for nautical miles) it is in nautical miles. The student wrote /1852 and called the
+    column km, and the planner once gave a km result as nautical miles. Any other SQL comes
+    back unchanged."""
+    total = _DISTANCE_SUM_RE.search(sql)
+    if not (total and _UNORDERED_LAG_RE.search(sql) and _INNER_SELECT_RE.search(sql)
+            and len(_PREV_LON_RE.findall(sql)) == 1):
+        return sql
+    nautical = nautical or total.group(1) == "1852"
+    unit, divisor = ("nautical_miles", 1852) if nautical else ("km", 1000)
+    sql = (sql[:total.start()]
+           + f"round(sum(haversine_m(prev_lat, prev_lon, lat, lon)) FILTER (WHERE ts - prev_ts"
+             f" <= {MAX_STEP_SQL}) / {divisor}, 1) AS {unit}"
+           + sql[total.end():])
+    sql = _UNORDERED_LAG_RE.sub("OVER (PARTITION BY mmsi ORDER BY ts)", sql)
+    sql = _INNER_SELECT_RE.sub("SELECT ts, lat, lon, ", sql, count=1)
+    return _PREV_LON_RE.sub("AS prev_lon,\n         lag(ts) OVER (PARTITION BY mmsi ORDER BY ts)"
+                            " AS prev_ts", sql, count=1)
 
 
 # The student learned every month with one year, the one it has in 2025-10-01..2026-09-30 (its
@@ -584,6 +681,18 @@ def run_port_calls(arguments: dict) -> tuple[dict, dict]:
     ship_type = arguments.get("ship_type") or None
     if str(ship_type).lower() in ("all", "any", "none"):
         ship_type = None  # the planner's way of saying "every ship type"
+    single = places.find(str(arguments.get("area") or ""), places.load()) if arguments.get("area") else None
+    if single is not None and single.kind == "port":
+        # Asked about one port, the tool gives the ships over the whole period, and the planner
+        # gave that total as an average per day ("visited Frederikshavn in January": 104).
+        reply = {"error": f"port_calls is for a country or an area with several ports, not one "
+                          f"port. For {single.name} use ask_data, e.g. 'How many ships docked in "
+                          f"{single.name} from <first day> to <last day>?' or, for an average, "
+                          f"'What was the average number of ships docked in {single.name} per day "
+                          f"from <first day> to <last day>?'"}
+        step = {"request": f"port_calls({json.dumps(arguments)})", "places": [],
+                "sql": "(port_calls)", "result": {"error": reply["error"]}}
+        return step, reply
     reply = functions.port_calls(
         str(arguments.get("country", "")), str(arguments.get("date_from", "")),
         str(arguments.get("date_to", "")), ship_type,
@@ -680,7 +789,7 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
                         "result": {"error": "This exact request already failed and would fail "
                                             "again. Rephrase it more simply or split it."}}
             else:
-                step = ask_data(student, request, session, model=sql_model)
+                step = ask_data(student, request, session, model=sql_model, question=question)
                 if "error" in step["result"]:
                     failed.add(key)
             print(f"[ask_data] {request}\n    -> {step['sql']}", file=sys.stderr)
@@ -986,7 +1095,8 @@ _COUNT_WORDS_RE = re.compile(
 _VISUAL_RE = re.compile(r"\b(heat ?maps?|maps?|charts?|plots?|graphs?|draw|visuali[sz]\w*)\b",
                         re.IGNORECASE)
 _LIST_WORDS_RE = re.compile(
-    r"^\s*(?:list|name)\b|\bwhich\s+(?:\w+\s+)?(?:vessels|ships|boats|ferries)\b", re.IGNORECASE)
+    r"^\s*(?:list|name)\b|\bwhich\s+(?:\w+\s+)?(?:vessels|ships|boats|ferries|tankers|tugs"
+    r"|freighters|yachts|sailboats|trawlers|craft)\b", re.IGNORECASE)
 
 
 _DOCKED_RE = re.compile(r"\b(dock\w*|harbou?r\w*|moored|in port|called|visit\w*)\b",
