@@ -579,6 +579,10 @@ def render_args(skeleton: str, values: dict[str, object]) -> dict:
     return args
 
 
+_DRAWN_AREA_RE = re.compile(r"\bthe selected area\b|\bUse the exact rectangle selected by the user\b",
+                            re.IGNORECASE)
+
+
 def candidate(run: dict) -> tuple[dict | None, str]:
     """(pattern part from one logged run, "") or (None, why the run gives no pattern). Failed
     steps are left out: a planner run that got there after a failed attempt counts too."""
@@ -588,6 +592,9 @@ def candidate(run: dict) -> tuple[dict | None, str]:
     if len(steps) != 1:
         return None, "not one successful query"
     question = run.get("question_as_read") or run["question"]
+    if _DRAWN_AREA_RE.search(question) or _DRAWN_AREA_RE.search(run["question"]):
+        # Its box is in the SQL but not in the question: another rectangle would get this one.
+        return None, "asked with a rectangle drawn on the map"
     alias, values, words = question_skeleton(question)
     step = steps[0]
     if step["sql"] == "(port_calls)":
