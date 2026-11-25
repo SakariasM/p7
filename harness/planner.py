@@ -304,6 +304,32 @@ _ANNOUNCED_RE = re.compile(r"ask_data|find_place|propose_place|port_calls|\blet 
 NUDGE = "Call the tool you announced now, or give your final answer if you cannot continue."
 
 
+_FLOAT_NOISE_RE = re.compile(r"(?<![\d.])(\d+\.\d{7,})(?![\d.])")
+_CLOCK_RE = re.compile(r"(?<![\d:])(\d{1,2}:\d{2}(?::\d{2})?)(?![\d:])(?!\s*[-–]\s*\d)")
+
+
+def tidy_answer(text: str) -> str:
+    """The answer as plain text for the page: no markdown bold (shown as **ESSENCE**), float
+    noise rounded (9.199999809265137 meters -> 9.2), and clock times marked UTC when the
+    answer does not say so (all times in the data are UTC)."""
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = _FLOAT_NOISE_RE.sub(lambda m: f"{float(m.group(1)):.2f}".rstrip("0").rstrip("."), text)
+    if "UTC" not in text:
+        text = _CLOCK_RE.sub(r"\1 UTC", text)
+    return text
+
+
+_PLAN_ONLY_RE = re.compile(r"\s*(?:\*\*)?plan\b", re.IGNORECASE)
+
+
+def gave_up(steps: list[dict]) -> str:
+    """The answer when the planner ends with its plan and no query worked: "Which flag
+    countries were most common ..." once answered "Plan: 1. Rephrase the request ...". The
+    queries' errors are database messages, not for the user."""
+    return ("I could not answer this from the AIS data: none of the queries for it worked. "
+            "Try asking it more simply, or one part at a time.")
+
+
 def announced_step(content: str | None, has_data: bool = True) -> bool:
     """The planner described a next step instead of calling the tool for it. Before any data
     step, a turn that is only its plan ("Plan: 1. ...") counts too: it was once the answer."""
@@ -484,6 +510,16 @@ _PLAIN_WORDS = [
     (r"\btrawlers\b", "fishing vessels"), (r"\btrawler\b", "fishing vessel"),
     (r"\boil tankers\b", "tankers"), (r"\boil tanker\b", "tanker"),
     (r"\bwarships\b", "military ships"), (r"\bwarship\b", "military ship"),
+    # Live check 25 Nov: "Give me the number of ships docked in Copenhagen for every day from
+    # 10 to 14 March" got one total; "How many ships docked ... each day from ..." is split by
+    # day. "Deepest draught" got the smallest draught (SKUM, 0.9 m); "largest" got RAPHAEL, 13 m.
+    (r"\b(?:give|tell|show) me the (?:number|count) of\b", "how many"),
+    (r"\b(?:for|on) (?:each|every) (?:single |separate )?day\b", "each day"),
+    (r"\bdeepest draught\b", "largest draught"), (r"\bshallowest draught\b", "smallest draught"),
+    (r"\bdeepest draft\b", "largest draught"),
+    # The flag (flags.py) is the column flag_country; asked for "flag countries" the student
+    # wrote a column country that does not exist, and named the column it used it.
+    (r"\bflag (countr(?:y|ies)|states?)\b(?! \(flag_country\))", r"flag \1 (flag_country)"),
 ]
 
 
@@ -492,6 +528,10 @@ def plain_words(request: str) -> str:
     at Aarhus on average per day ...'. Visits to a country stay (they are port calls)."""
     for pattern, words in _PLAIN_WORDS:
         request = re.sub(pattern, words, request, flags=re.IGNORECASE)
+    # "how many ships docked in Copenhagen each day from ... to ... ." (from "Give me the
+    # number of ...") got one total; the same request ending in "?" was split by day.
+    if re.match(r"\s*how many\b", request, re.IGNORECASE) and not request.rstrip().endswith("?"):
+        request = re.sub(r"\s*[.!]?$", "?", request.rstrip(), count=1)
     return request
 
 
@@ -517,10 +557,12 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
     written = cap_lengths(extract_sql(response.choices[0].message.content))
-    sql = fix_distance(per_day_counts(fix_place_lists(fix_years(written, request)), request),
+    sql = fix_distance(moving_filter(per_day_counts(fix_place_lists(fix_years(written, request)),
+                                                    request), request),
                        bool(_NAUTICAL_RE.search(f"{request} {question}")))
     if area in named:
         sql = precise_area_box(area_in_positions(sql, area, request), area)
+    sql = names_to_mmsi(sql)
     stray = places.unexplained_boxes(sql, named, request)
     bad = invalid_values(sql)
     unknown = unknown_list_places(sql)
@@ -576,7 +618,8 @@ def own_place_names(request: str, named: list[places.Place]) -> str:
             if alias != place.name:
                 request = re.sub(rf"(?<!\w){re.escape(alias)}(?!\w)", place.name, request,
                                  flags=re.IGNORECASE)
-    return request
+    # "the selected area" for the alias "selected area" after "the": "entered the the selected area"
+    return re.sub(r"\b(the)\s+the\b", r"\1", request, flags=re.IGNORECASE)
 
 
 MAX_REAL_LENGTH_M = 400  # as sql_templates.py: longer AIS lengths are errors
@@ -681,6 +724,26 @@ def per_day_counts(sql: str, request: str) -> str:
         return sql
     return (f"SELECT date, count(DISTINCT mmsi) AS {alias} FROM {table} WHERE {where}\n"
             f"GROUP BY date ORDER BY date")
+
+
+_MOVING_ASKED_RE = re.compile(r"\b(?:moving|underway|under way|in motion)\b", re.IGNORECASE)
+_STILL_ASKED_RE = re.compile(r"\b(?:docked|still|moored|anchor\w*|harbou?red|in port|stationary)\b",
+                             re.IGNORECASE)
+
+
+def moving_filter(sql: str, request: str) -> str:
+    """A question about moving ships whose positions query has no speed condition gets
+    sog >= 1 (moving, as the schema defines it). "Which hour on 14 June 2026 had the most
+    different ships moving in Helsingør?" ranked hours by all ships there (31 at 08:00, 16 of
+    them moving) and got the right hour only by chance. Only a query with one WHERE and no
+    sog, nav_status or moving_in anywhere changes."""
+    if (not _MOVING_ASKED_RE.search(request) or _STILL_ASKED_RE.search(request)
+            or not re.search(r"\bvessel_positions\b", sql, re.IGNORECASE)
+            or re.search(r"\b(?:sog|nav_status|moving_in)\b", sql, re.IGNORECASE)
+            or len(re.findall(r"\bWHERE\b", sql, re.IGNORECASE)) != 1
+            or re.search(r"\bOR\b", sql, re.IGNORECASE)):  # "sog >= 1 AND a OR b" binds wrong
+        return sql
+    return re.sub(r"\bWHERE\b", "WHERE sog >= 1 AND", sql, count=1, flags=re.IGNORECASE)
 
 
 _LIST_LOOKUP_RE = re.compile(
@@ -821,6 +884,24 @@ def with_total(sql: str, result: dict) -> dict:
 
 
 _NAME_EQ_RE = re.compile(r"\bname\s*=\s*'((?:[^']|'')+)'", re.IGNORECASE)
+_NAME_FILTER_RE = re.compile(r"\b(WHERE|AND)(\s+)(?:\w+\.)?name\s*=\s*'((?:[^']|'')+)'",
+                             re.IGNORECASE)
+
+
+def names_to_mmsi(sql: str) -> str:
+    """A filter on a vessel name that exactly one MMSI has, as a filter on that MMSI: some of a
+    ship's reports carry no name (139 of KBV 490's 2,321 on 1 Sep 2026; AIDANOVA's first
+    reports), so by name its distance came out 98.6 km instead of 105.4 and its first report
+    1.6 hours late. Names several ships share (IDA) stay names."""
+    def by_mmsi(m: re.Match) -> str:
+        quoted = m.group(3)
+        found = query_ais_data(f"SELECT DISTINCT mmsi FROM vessel_days WHERE name = '{quoted}' "
+                               f"LIMIT 2")
+        rows = found.get("rows") or []
+        if "error" in found or len(rows) != 1:
+            return m.group(0)
+        return f"{m.group(1)}{m.group(2)}mmsi = {int(rows[0][0])}"
+    return _NAME_FILTER_RE.sub(by_mmsi, sql)
 
 
 def unknown_names(sql: str, result: dict) -> dict:
@@ -840,13 +921,28 @@ def unknown_names(sql: str, result: dict) -> dict:
         similar = query_ais_data(
             f"SELECT DISTINCT name FROM vessel_days WHERE name ILIKE '%{quoted}%' "
             f"ORDER BY name LIMIT 8").get("rows") or []
+        word = name
+        if not similar:  # "Stena Line Passenger": the company's ships are named STENA ...
+            first = re.match(r"[A-Za-zÆØÅæøå]{3,}", name)
+            word = first.group(0).upper() if first else name
+            if first and word != name.upper():
+                similar = query_ais_data(
+                    f"SELECT DISTINCT name FROM vessel_days WHERE name ILIKE '{word}%' "
+                    f"ORDER BY name LIMIT 8").get("rows") or []
+        names = [r[0] for r in similar]
+        key = word.upper()
+        where = ("start with" if all(n.upper().startswith(key) for n in names) else
+                 "end with" if all(n.upper().endswith(key) for n in names) else "contain")
         return {"error": f"No vessel in the data is named '{name}'. Names are as the crews "
                          "typed them, and AIS has no owner, operator or company field, so a "
-                         "shipping company's fleet cannot be selected. "
-                         + (f"Vessels whose names contain '{name}': "
-                            f"{', '.join(r[0] for r in similar)}; ask again naming one of them "
-                            "if one is meant." if similar else
-                            "Tell the user this instead of giving a number.")}
+                         "shipping company's fleet cannot be selected for certain. "
+                         + (f"Vessels whose names contain '{word}': "
+                            f"{', '.join(names)}. If the question means a company's ships, "
+                            f"ask again for the ships whose names {where} {key} (e.g. 'How many "
+                            f"passenger ships whose names {where} {key} docked in <place> on "
+                            f"<date>?') and say in the "
+                            "answer that this goes by name, as AIS has no operator field."
+                            if similar else "Tell the user this instead of giving a number.")}
     return result
 
 
@@ -976,13 +1072,19 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
         if plan is None and strip_thinking(message.content):
             plan = strip_thinking(message.content)
 
-        if not message.tool_calls and announced_step(message.content, bool(steps)) and nudges < 2:
+        answered = any("error" not in (st.get("result") or {}) for st in steps)
+        if not message.tool_calls and announced_step(message.content, answered) and nudges < 2:
             nudges += 1
             messages.append({"role": "user", "content": NUDGE})
             continue
 
         if not message.tool_calls:
             answer = with_cruise_note(question, strip_thinking(message.content), steps)
+            if not answered and (_PLAN_ONLY_RE.match(answer) or (steps and not re.search(
+                    r"\b(?:not|cannot|can't|unable|no|none)\b", answer, re.IGNORECASE))):
+                # every query failed: the planner once answered "Denmark" with nothing found
+                answer = gave_up(steps)
+            answer = tidy_answer(answer)
             if return_trace:
                 return {"answer": answer, "plan": plan, "tool_calls": steps,
                         "place_calls": place_calls}
@@ -1323,6 +1425,10 @@ _DATE_WORDS_RE = re.compile(
 _COUNT_WORDS_RE = re.compile(
     r"\b(how many|number of|count|total|average|mean|largest|longest|biggest|smallest|"
     r"fastest|slowest|busiest)\b", re.IGNORECASE)
+_TOP_ONE_RE = re.compile(
+    r"\b(?:which|what)\s+(?:\w+\s+){0,2}(?:ship|vessel|boat|tanker|ferry|tug)\b.{0,100}?"
+    r"\b(?:largest|longest|biggest|deepest|widest|heaviest|highest|fastest|smallest|shortest|"
+    r"slowest|shallowest)\b", re.IGNORECASE)
 _DISTANCE_Q_RE = re.compile(
     r"\bhow far did\b|\bhow many (?:km|kilomet(?:er|re)s|nautical miles|miles)\b"
     r"|\b(?:sail|sailed|travel+ed|covered|steamed)\b.{0,40}"
@@ -1459,6 +1565,12 @@ def _run_routed(question: str, max_turns: int, enable_thinking: bool, return_tra
             choice, reason = "direct", f"not reply: distance is in the data ({reason})"
         elif choice == "reply" and clearly_data(question):
             choice, reason = "plan", f"not reply: a question about ship data ({reason})"
+        if choice == "plan" and _TOP_ONE_RE.search(question) and len(
+                places.mentioned(question, places.load())) <= 1:
+            # "Which ship docked in Aarhus in May 2026 had the deepest draught?": the planner
+            # listed every docked ship by name and took the deepest it could see (ESSENCE, 9.2 m
+            # of 50 rows) instead of RAPHAEL, 13.0 m; the student writes the maximum in one query.
+            choice, reason = "direct", f"one ship with the most of something ({reason})"
         elif choice == "plan" and plain_list(question):
             choice, reason = "direct", f"not plan: a list at one place ({reason})"
         if warning:
@@ -1517,7 +1629,8 @@ def phrase(planner: OpenAI, question: str, step: dict, map_view: bool = False) -
         max_tokens=300,
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
-    return with_cruise_note(question, strip_thinking(response.choices[0].message.content), [step])
+    return tidy_answer(with_cruise_note(
+        question, strip_thinking(response.choices[0].message.content), [step]))
 
 
 SAME_QUESTION_PROMPT = """\

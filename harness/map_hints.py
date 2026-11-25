@@ -210,8 +210,11 @@ def map_hints(
     }
     one_vessel = len(vessels) == 1 or (query is not None and not vessels)
     short = start is not None and end - start <= timedelta(days=MAX_ROUTE_DAYS)
-    wants_route = bool(re.search(r"\b(route|track|path|went|sailed|travel)", read, re.I))
-    if one_vessel and short and (wants_route or trace.get("route") == "reply"):
+    # Only a map request (the reply route's "visualisation") is drawn as a route: the page then
+    # replaces the answer with "Showing the route of ...". A data answer about how far a ship
+    # "sailed", or a decline ("how much fuel did MSC STACEY burn"), kept its text hidden.
+    map_request = trace.get("route") == "reply" and trace.get("route_reason") == "visualisation"
+    if one_vessel and short and map_request:
         hints["action"] = "route"
     elif hints["at"] or hints["places"] or vessels:
         hints["action"] = "snapshot"
