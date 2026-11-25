@@ -1,4 +1,5 @@
 import { $ } from "./shared.js";
+import { showMap } from "./sidebars.js";
 
 let selectedArea = null;
 let drawnRectangle = null;
@@ -19,24 +20,22 @@ function areaFromBounds(bounds) {
 }
 
 function renderArea() {
-  const summary = $("selected-area-summary");
+  const chip = $("selected-area-chip");
   const coordinates = $("selected-area-coordinates");
-  const clearButton = $("clear-area-btn");
+  chip.hidden = !selectedArea;
   if (!selectedArea) {
-    summary.textContent = "No exact area selected";
-    coordinates.textContent = "Draw a rectangle to limit the agent to every position inside it.";
-    clearButton.hidden = true;
+    chip.querySelector("details").open = false;
+    $("ask-q").placeholder = "Ask about a vessel, route, or area…";
     return;
   }
   const { west, south, east, north } = selectedArea;
-  summary.textContent = "Exact area attached to your question";
+  $("ask-q").placeholder = "How many ships passed through here from 3 to 5 May 2026?";
   coordinates.textContent = [
-    `SW ${south.toFixed(5)}, ${west.toFixed(5)}`,
-    `NW ${north.toFixed(5)}, ${west.toFixed(5)}`,
-    `NE ${north.toFixed(5)}, ${east.toFixed(5)}`,
-    `SE ${south.toFixed(5)}, ${east.toFixed(5)}`,
+    `SW ${south.toFixed(6)}, ${west.toFixed(6)}`,
+    `NW ${north.toFixed(6)}, ${west.toFixed(6)}`,
+    `NE ${north.toFixed(6)}, ${east.toFixed(6)}`,
+    `SE ${south.toFixed(6)}, ${east.toFixed(6)}`,
   ].join("  ·  ");
-  clearButton.hidden = false;
 }
 
 function useRectangle(layer) {
@@ -68,11 +67,15 @@ export function initializeAreaSelection(map) {
   });
   map.on(L.Draw.Event.CREATED, event => useRectangle(event.layer));
   $("draw-area-btn").addEventListener("click", () => {
+    showMap();
     drawRectangle.enable();
-    if (window.matchMedia("(max-width: 820px)").matches) {
+    if (window.matchMedia("(max-width: 760px)").matches) {
       map.getContainer().scrollIntoView({ behavior: "smooth", block: "center" });
     }
   });
-  $("clear-area-btn").addEventListener("click", clearSelectedArea);
+  $("clear-area-btn").addEventListener("click", () => {
+    clearSelectedArea();
+    $("draw-area-btn").focus();
+  });
   renderArea();
 }

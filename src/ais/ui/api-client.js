@@ -18,10 +18,11 @@ export async function getJson(path, params = {}) {
   return readJson(await fetch(url));
 }
 
-export async function postJson(path, body) {
+export async function postJson(path, body, signal) {
   return readJson(await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   }));
 }

@@ -8,112 +8,134 @@
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css">
-  <link rel="stylesheet" href="/ui-assets/styles.css">
+  <link rel="stylesheet" href="/ui-assets/styles.css?v=sidebars">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
   <script type="module" src="/ui-assets/main.js"></script>
 </head>
 <body>
   <main class="app-shell">
-    <aside class="sidebar">
-      <header class="brand">
-        <div class="brand-mark" aria-hidden="true">⌁</div>
-        <div>
-          <h1>AIS Explorer</h1>
-          <p>Danish waters · <span id="period">October 2025–September 2026</span> · UTC</p>
-        </div>
-      </header>
-
-      <section class="panel" aria-labelledby="assistant-heading">
-        <div class="panel-header">
-          <div><p class="eyebrow">Data assistant</p><h2 id="assistant-heading">Ask about ship activity</h2></div>
-          <span class="badge">AI</span>
-        </div>
-        <label for="ask-q">Question</label>
-        <textarea id="ask-q" placeholder="How many tankers entered this area in March 2026?"></textarea>
-        <p class="helper" id="ask-examples">
-          Try <button class="link">Which ships were docked in Skagen at 08:00 on 3 March 2026?</button>
-          or <button class="link">Show the route of TYCHO BRAHE from 1 to 3 March 2026</button>.
-        </p>
-        <div class="area-card">
-          <div class="area-card-header">
-            <strong id="selected-area-summary">No exact area selected</strong>
-            <div>
-              <button id="draw-area-btn" class="secondary compact" type="button">Draw area</button>
-              <button id="clear-area-btn" class="link" type="button" hidden>Clear</button>
-            </div>
-          </div>
-          <p id="selected-area-coordinates" class="coordinates"></p>
-        </div>
-        <div class="button-row">
-          <button id="ask-btn" type="button">Ask the data</button>
-          <button id="ask-clear" class="secondary compact" type="button">Reset</button>
-        </div>
-        <div id="ask-status" class="status" role="status"></div>
-        <div id="ask-answer" class="answer" hidden></div>
-        <div id="ask-feedback" class="helper" hidden>
-          <span id="ask-fb-text">Was this answer right?</span>
-          <span id="ask-fb-buttons"><button class="link" id="ask-fb-yes" type="button">Yes</button> · <button class="link" id="ask-fb-no" type="button">No</button></span>
-          <div id="ask-fb-note" class="form-row" hidden>
-            <input id="ask-note" placeholder="What was wrong? (optional)">
-            <button id="ask-fb-send" class="compact" type="button">Send</button>
+    <aside id="controls-sidebar" class="controls-sidebar side-panel" aria-label="Map controls">
+      <button id="controls-toggle" class="sidebar-toggle" type="button" aria-controls="controls-content" aria-expanded="true" aria-label="Collapse map controls">‹</button>
+      <div id="controls-content" class="controls-content">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">⌁</div>
+          <div>
+            <h1>AIS Explorer</h1>
+            <p>Danish waters · October 2025–September 2026 · UTC</p>
           </div>
         </div>
-        <ul id="ask-vessels" class="list"></ul>
-      </section>
+        <section class="panel" aria-labelledby="snapshot-heading">
+          <div class="panel-header"><div><p class="eyebrow">Map snapshot</p><h2 id="snapshot-heading">Ships at a moment</h2></div></div>
+          <div class="form-row">
+            <div><label for="at">Time</label><input id="at" type="datetime-local" value="2026-01-20T12:00" min="2025-10-01T00:00" max="2026-09-30T23:59"></div>
+            <div class="narrow-field"><label for="lookback">Seen within</label><select id="lookback"><option value="5">5 min</option><option value="10" selected>10 min</option><option value="30">30 min</option><option value="60">60 min</option></select></div>
+          </div>
+          <div class="form-row">
+            <div><label for="name">Name contains</label><input id="name" placeholder="e.g. MAERSK" autocomplete="off"></div>
+            <div><label for="type">Ship type</label><select id="type"><option value="">All types</option></select></div>
+          </div>
+          <p class="helper" id="presets">
+            Try <button class="link" data-name="MAERSK">Maersk</button>, <button class="link" data-name="SEAWAYS">DFDS</button>,
+            <button class="link" data-name="STENA">Stena</button>, or <button class="link" data-type="Sailing">sailing boats</button>.
+            <span id="clear-filter" hidden> · <button class="link" data-name="" data-type="">Clear</button></span>
+          </p>
+          <div class="button-row"><button id="snap" type="button">Refresh ships in view</button></div>
+          <div id="legend" class="legend"></div>
+        </section>
 
-      <section class="panel" aria-labelledby="snapshot-heading">
-        <div class="panel-header"><div><p class="eyebrow">Map snapshot</p><h2 id="snapshot-heading">Ships at a moment</h2></div></div>
-        <div class="form-row">
-          <div><label for="at">Time</label><input id="at" type="datetime-local" value="2026-01-20T12:00" min="2025-10-01T00:00" max="2026-09-30T23:59"></div>
-          <div class="narrow-field"><label for="lookback">Seen within</label><select id="lookback"><option value="5">5 min</option><option value="10" selected>10 min</option><option value="30">30 min</option><option value="60">60 min</option></select></div>
-        </div>
-        <div class="form-row">
-          <div><label for="name">Name contains</label><input id="name" placeholder="e.g. MAERSK" autocomplete="off"></div>
-          <div><label for="type">Ship type</label><select id="type"><option value="">All types</option></select></div>
-        </div>
-        <p class="helper" id="presets">
-          Try <button class="link" data-name="MAERSK">Maersk</button>, <button class="link" data-name="SEAWAYS">DFDS</button>,
-          <button class="link" data-name="STENA">Stena</button>, or <button class="link" data-type="Sailing">sailing boats</button>.
-          <span id="clear-filter" hidden> · <button class="link" data-name="" data-type="">Clear</button></span>
-        </p>
-        <div class="button-row"><button id="snap" type="button">Refresh ships in view</button></div>
-        <div id="snap-status" class="status" role="status"></div>
-        <div id="legend" class="legend"></div>
-      </section>
+        <section class="panel" aria-labelledby="search-heading">
+          <div class="panel-header"><div><p class="eyebrow">Vessel lookup</p><h2 id="search-heading">Find a vessel</h2></div></div>
+          <label for="q">Name, callsign, or MMSI</label>
+          <input id="q" placeholder="Start typing…" autocomplete="off">
+          <div id="search-status" class="status" role="status"></div>
+          <ul id="results" class="list"></ul>
+        </section>
 
-      <section class="panel" aria-labelledby="search-heading">
-        <div class="panel-header"><div><p class="eyebrow">Vessel lookup</p><h2 id="search-heading">Find a vessel</h2></div></div>
-        <label for="q">Name, callsign, or MMSI</label>
-        <input id="q" placeholder="Start typing…" autocomplete="off">
-        <div id="search-status" class="status" role="status"></div>
-        <ul id="results" class="list"></ul>
-      </section>
-
-      <section id="vessel-panel" class="panel" aria-labelledby="vessel-heading" hidden>
-        <div class="panel-header"><div><p class="eyebrow">Selected vessel</p><h2 id="vessel-heading">Details and movement</h2></div></div>
-        <dl id="vessel"></dl>
-        <div class="form-row">
-          <div><label for="route-from">Route from</label><input id="route-from" type="date" min="2025-10-01" max="2026-09-30"></div>
-          <div><label for="route-to">Route to</label><input id="route-to" type="date" min="2025-10-01" max="2026-09-30"></div>
-        </div>
-        <div class="button-row"><button id="route-btn" type="button">Show route</button><button id="clear-btn" class="secondary compact" type="button">Clear</button></div>
-        <div class="legend" id="route-legend" hidden><span><i class="ramp"></i>earlier → later</span><span><i class="dot stop-dot"></i>stop</span></div>
-        <div id="player" hidden>
-          <div class="form-row"><button id="play-btn" class="compact" type="button">Play</button><input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Playback position"><select id="speed" class="narrow-field" aria-label="Playback speed"><option value="45000">Slow</option><option value="20000" selected>Normal</option><option value="8000">Fast</option></select></div>
-          <div id="play-time" class="status"></div>
-        </div>
-        <button id="track-btn" class="secondary" type="button">Raw positions around selected time</button>
-        <div id="vessel-status" class="status" role="status"></div>
-        <p class="eyebrow">Trips ±15 days</p>
-        <ul id="trips" class="list"></ul>
-      </section>
+        <section id="vessel-panel" class="panel" aria-labelledby="vessel-heading" hidden>
+          <div class="panel-header"><div><p class="eyebrow">Selected vessel</p><h2 id="vessel-heading">Details and movement</h2></div></div>
+          <dl id="vessel"></dl>
+          <div class="form-row">
+            <div><label for="route-from">Route from</label><input id="route-from" type="date" min="2025-10-01" max="2026-09-30"></div>
+            <div><label for="route-to">Route to</label><input id="route-to" type="date" min="2025-10-01" max="2026-09-30"></div>
+          </div>
+          <div class="button-row"><button id="route-btn" type="button">Show route</button><button id="clear-btn" class="secondary compact" type="button">Clear</button></div>
+          <div class="legend" id="route-legend" hidden><span><i class="ramp"></i>earlier → later</span><span><i class="dot stop-dot"></i>stop</span></div>
+          <div id="player" hidden>
+            <div class="form-row"><button id="play-btn" class="compact" type="button">Play</button><input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Playback position"><select id="speed" class="narrow-field" aria-label="Playback speed"><option value="45000">Slow</option><option value="20000" selected>Normal</option><option value="8000">Fast</option></select></div>
+            <div id="play-time" class="status"></div>
+          </div>
+          <button id="track-btn" class="secondary" type="button">Raw positions around selected time</button>
+          <div id="vessel-status" class="status" role="status"></div>
+          <p class="eyebrow">Trips ±15 days</p>
+          <ul id="trips" class="list"></ul>
+        </section>
+      </div>
     </aside>
-
     <section class="map-wrap" aria-label="Interactive vessel map">
       <div id="map"></div>
       <div class="map-tip">Draw an area, then ask a question to query that exact rectangle</div>
+      <div id="snap-status" class="map-data-status status" role="status">Loading ship positions…</div>
     </section>
+    <aside id="chat-sidebar" class="chat-sidebar side-panel" aria-labelledby="assistant-heading">
+      <button id="chat-toggle" class="sidebar-toggle" type="button" aria-controls="chat-panel-content" aria-expanded="true" aria-label="Collapse chat">›</button>
+      <div id="chat-panel-content" class="chat-panel-content">
+        <header class="chat-header">
+          <div><p class="eyebrow">Data assistant</p><h2 id="assistant-heading">Ask about ship activity</h2></div>
+          <span class="badge">AI</span>
+        </header>
+        <div id="chat-content" class="chat-content">
+          <div class="chat-examples" id="ask-examples">
+            <p>Suggested questions</p>
+            <button type="button">Which ships were docked in Skagen at 08:00 on 3 March 2026?</button>
+            <button type="button">Show the route of TYCHO BRAHE from 1 to 3 March 2026</button>
+          </div>
+          <div id="chat-thread" role="log" aria-label="Conversation" aria-relevant="additions text"></div>
+        </div>
+        <div class="chat-composer">
+          <div class="composer-tools">
+            <button id="draw-area-btn" class="secondary compact" type="button">Draw area</button>
+            <div id="selected-area-chip" class="area-chip" hidden>
+              <details>
+                <summary>Selected area</summary>
+                <p id="selected-area-coordinates" class="coordinates"></p>
+              </details>
+              <button id="clear-area-btn" type="button" aria-label="Remove selected area">×</button>
+            </div>
+          </div>
+          <label for="ask-q">Question</label>
+          <textarea id="ask-q" placeholder="Ask about a vessel, route, or area…"></textarea>
+          <div class="button-row">
+            <button id="ask-btn" type="button">Ask the data</button>
+            <button id="ask-clear" class="secondary compact" type="button">Clear chat and view</button>
+          </div>
+          <div id="ask-status" class="status" role="status"></div>
+        </div>
+      </div>
+    </aside>
+
+    <template id="chat-turn-template">
+      <article class="chat-turn">
+        <div class="chat-user" role="group" aria-label="Your question">
+          <p class="chat-question"></p>
+          <span class="chat-area-note" hidden>Selected area attached</span>
+        </div>
+        <div class="chat-reply" role="group" aria-label="Data assistant">
+          <p class="chat-turn-status status"></p>
+          <p class="answer" hidden></p>
+          <ul class="chat-vessels list"></ul>
+          <div class="chat-feedback helper" hidden>
+            <span class="feedback-text">Was this answer right?</span>
+            <span class="feedback-buttons"><button class="link feedback-yes" type="button">Yes</button> · <button class="link feedback-no" type="button">No</button></span>
+            <div class="feedback-form form-row" hidden>
+              <input aria-label="Feedback note" placeholder="What was wrong? (optional)">
+              <button class="compact" type="button">Send</button>
+            </div>
+          </div>
+        </div>
+      </article>
+    </template>
+
   </main>
 </body>
 </html>
