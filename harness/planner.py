@@ -22,6 +22,7 @@ CLI usage (needs both llm-serve and the student job, see slurm/serve_student.slu
 """
 
 import json
+from contextvars import ContextVar
 from datetime import date, timedelta
 import os
 import re
@@ -187,6 +188,49 @@ PROPOSE_PLACE_SCHEMA = {
 }
 
 TOOLS = [ASK_DATA_SCHEMA, FIND_PLACE_SCHEMA, PROPOSE_PLACE_SCHEMA, functions.PORT_CALLS_SCHEMA]
+
+
+SELECTED_AREA = "the selected area"
+_selected_area: ContextVar["places.Place | None"] = ContextVar("selected_area", default=None)
+_NUM_RE = r"(-?\d+(?:\.\d+)?)"
+# The text api.py (SelectedArea.add_to_question) adds to a question asked with a drawn rectangle.
+_AREA_TEXT_RE = re.compile(
+    r"\s*Use the exact rectangle selected by the user for this question\..*?"
+    rf"west longitude is {_NUM_RE}, south latitude is {_NUM_RE}, east longitude is {_NUM_RE},"
+    rf" and north latitude is {_NUM_RE}\..*\Z", re.DOTALL | re.IGNORECASE)
+_THROUGH_HERE_RE = re.compile(r"\b(through|past|by|in|at|near|around|inside|within)\s+here\b",
+                              re.IGNORECASE)
+_HERE_RE = re.compile(r"\bhere\b", re.IGNORECASE)
+_THIS_AREA_RE = re.compile(
+    r"\b(?:this|that|the marked|the drawn|the selected|my|the chosen)\s+"
+    r"(?:area|region|rectangle|box|zone|selection)\b", re.IGNORECASE)
+
+
+def take_selected_area(question: str) -> tuple[str, "places.Place | None"]:
+    """A question asked with a rectangle drawn on the map, as a question about "the selected
+    area" and that area as a place. The student never learned the rectangle text: it looked the
+    coordinates up as a place name ("12.627,56.009,..."), or took a port ("Horsens"), and the
+    relative-date rewrite put the period inside the text. "here" and "this area" become the
+    selected area; a question that names neither gets "in the selected area"."""
+    m = _AREA_TEXT_RE.search(question)
+    if not m:
+        return question, None
+    west, south, east, north = (float(x) for x in m.groups())
+    area = places.Place(SELECTED_AREA, (west, south, east, north), kind="area",
+                        aliases=["selected area"], source="map", status="selected")
+    asked = question[:m.start()].rstrip()
+    text = _THIS_AREA_RE.sub(SELECTED_AREA, asked)
+    text = _THROUGH_HERE_RE.sub(lambda h: f"{h.group(1)} {SELECTED_AREA}", text)
+    text = _HERE_RE.sub(f"in {SELECTED_AREA}", text)
+    if SELECTED_AREA not in text.lower():
+        text = re.sub(r"\s*([?.!]*)\s*\Z", lambda e: f" in {SELECTED_AREA}{e.group(1)}", asked,
+                      count=1)
+    return text, area
+
+
+def selected_area(session: list[places.Place] | None = None) -> "places.Place | None":
+    """The rectangle drawn for this question: set by run_routed, or in the planner's session."""
+    return next((p for p in session or [] if p.name == SELECTED_AREA), None) or _selected_area.get()
 
 
 def find_place(name: str, session: list[places.Place]) -> dict:
@@ -399,7 +443,9 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
     planner wrote the request: a unit it asks for (nautical miles) holds even if the request
     leaves it out."""
     request = plain_words(spell_out(request))
-    named = places.mentioned(request, places.load() + (session or []))
+    area = selected_area(session)
+    session = (session or []) + ([area] if area and area not in (session or []) else [])
+    named = places.mentioned(request, places.load() + session)
     request = own_place_names(request, named)
     response = student.chat.completions.create(
         model=model,
@@ -412,6 +458,8 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
     written = cap_lengths(extract_sql(response.choices[0].message.content))
     sql = fix_distance(fix_place_lists(fix_years(written, request)),
                        bool(_NAUTICAL_RE.search(f"{request} {question}")))
+    if area in named:
+        sql = precise_area_box(area_in_positions(sql, area, request), area)
     stray = places.unexplained_boxes(sql, named, request)
     bad = invalid_values(sql)
     unknown = unknown_list_places(sql)
@@ -534,6 +582,58 @@ def fix_distance(sql: str, nautical: bool = False) -> str:
     sql = _INNER_SELECT_RE.sub("SELECT ts, lat, lon, ", sql, count=1)
     return _PREV_LON_RE.sub("AS prev_lon,\n         lag(ts) OVER (PARTITION BY mmsi ORDER BY ts)"
                             " AS prev_ts", sql, count=1)
+
+
+_LIST_LOOKUP_RE = re.compile(
+    r"\blist_(?:contains|has_any)\s*\(\s*(?:\w+\.)?(places|still_in|moving_in)\s*,\s*"
+    r"('(?:[^']|'')*'|\[[^\]]*\])\s*\)", re.IGNORECASE)
+_DAYS_ONLY_RE = re.compile(r"\b(?:distance_km|max_sog|avg_sog|reports|first_ts|last_ts|places|"
+                           r"still_in|moving_in)\b", re.IGNORECASE)
+_MOVING_WORDS_RE = re.compile(r"\b(?:moving|underway|under way|sailing|in motion)\b",
+                              re.IGNORECASE)
+
+
+def area_box_sql(area: places.Place) -> str:
+    west, south, east, north = area.box
+    return f"lon BETWEEN {west:.6f} AND {east:.6f} AND lat BETWEEN {south:.6f} AND {north:.6f}"
+
+
+def precise_area_box(sql: str, area: places.Place | None) -> str:
+    """The selected area's box with the rectangle's own numbers: the student copies the place
+    list's (12.627 for 12.627068), which moves the edges by up to 50 m."""
+    if area is None:
+        return sql
+    for x in area.box:
+        sql = re.sub(rf"(?<![\d.]){re.escape(places.coord(x))}(?![\d])", f"{x:.6f}", sql)
+    return sql
+
+
+def area_in_positions(sql: str, area: places.Place | None, request: str) -> str:
+    """A period query on vessel_days about the selected area, on vessel_positions with its box.
+    vessel_days holds only the named places, but over more than a day the student always writes
+    vessel_days with list_contains(moving_in, 'the selected area') (or 'Area 1', or the
+    coordinates), so the rectangle found nothing. A vessel-day row becomes the vessel's reports
+    that day (count(*) per day -> count(DISTINCT mmsi)); still_in adds sog < 0.5, moving_in
+    adds sog >= 1 only when the request says moving ("passed here" is any report in the box).
+    Queries that also name a known place, or use columns only vessel_days has, stay."""
+    if area is None or len(re.findall(r"\bvessel_days\b", sql, re.IGNORECASE)) != 1:
+        return sql
+    lookups = _LIST_LOOKUP_RE.findall(sql)
+    known = {p.name for p in places.load(include_learned=False)}
+    names = [n.replace("''", "'") for _, arg in lookups for n in re.findall(r"'((?:[^']|'')*)'", arg)]
+    if not names or any(n in known for n in names):
+        return sql
+
+    def box(m: re.Match) -> str:
+        extra = {"still_in": " AND sog < 0.5",
+                 "moving_in": " AND sog >= 1" if _MOVING_WORDS_RE.search(request) else ""}
+        return f"({area_box_sql(area)}{extra.get(m.group(1).lower(), '')})"
+
+    rewritten = _LIST_LOOKUP_RE.sub(box, sql)
+    if _DAYS_ONLY_RE.search(rewritten):
+        return sql
+    rewritten = re.sub(r"\bvessel_days\b", "vessel_positions", rewritten, flags=re.IGNORECASE)
+    return re.sub(r"\bcount\(\s*\*\s*\)", "count(DISTINCT mmsi)", rewritten, flags=re.IGNORECASE)
 
 
 # The student learned every month with one year, the one it has in 2025-10-01..2026-09-30 (its
@@ -712,6 +812,8 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
         return_trace: bool = False, sql_writer: str = "student"):
     """sql_writer="8b" lets the 8B write the SQL for its own requests instead of the student
     (same prompt, place list and guards), to measure what the student adds."""
+    question, drawn = take_selected_area(question)
+    area = drawn or _selected_area.get()
     planner = llm_usage.client(get_base_url())
     if sql_writer == "8b":
         student, sql_model = planner, MODEL_PATH
@@ -726,7 +828,7 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
     plan = None
     steps = []
     place_calls = []
-    session: list[places.Place] = []  # places accepted for this question only
+    session: list[places.Place] = [area] if area else []  # places for this question only
     proposed: set[str] = set()
     failed = set()  # requests that already failed; the student is deterministic
     nudges = 0
@@ -1179,7 +1281,18 @@ def run_routed(question: str, max_turns: int = 10, enable_thinking: bool = False
     comparison of 2026-10-14 showed the student alone is best and 4x faster on single-step
     questions, while the planner only pays off when a question needs several steps.
     Questions no query can answer (off-topic, not in AIS data, maps, outside the data period,
-    speculation about people) get a short reply from the 8B without any query."""
+    speculation about people) get a short reply from the 8B without any query.
+    A rectangle drawn on the map (api.py's text) is "the selected area" for the whole question."""
+    question, area = take_selected_area(question)
+    token = _selected_area.set(area)
+    try:
+        return _run_routed(question, max_turns, enable_thinking, return_trace, map_view)
+    finally:
+        _selected_area.reset(token)
+
+
+def _run_routed(question: str, max_turns: int, enable_thinking: bool, return_trace: bool,
+                map_view: bool):
     asked = question
     question, relative_note = resolve_relative(question)
     question = bridges_named(question)
@@ -1198,7 +1311,9 @@ def run_routed(question: str, max_turns: int = 10, enable_thinking: bool = False
         return trace if return_trace else period_reply
     note = "\n".join(n for n in (relative_note, note) if n)
     planner = llm_usage.client(get_base_url())
-    trace, warning = _run_learned(planner, question, map_view) if USE_QUERY_STORE else (None, None)
+    # A drawn rectangle is not a slot of any learned pattern: never answer it from the store.
+    trace, warning = (_run_learned(planner, question, map_view)
+                      if USE_QUERY_STORE and _selected_area.get() is None else (None, None))
     if trace is None:
         choice, reason = route(planner, question)
         if choice == "reply" and clearly_data(question):
