@@ -18,6 +18,8 @@ from pathlib import Path
 
 import duckdb
 
+import flags
+
 PROJECT_DIR = Path(os.environ.get("P7_PROJECT_DIR", "/ceph/project/P7-Agent-Harness"))
 DATA_DIR = PROJECT_DIR / "data" / "processed" / "ais"
 PARQUET_GLOB = f"{DATA_DIR}/*/ais.parquet"
@@ -63,9 +65,11 @@ _NOT_SHIPS = ", ".join(str(s["mmsi"]) for s in json.loads(
     Path(__file__).with_name("not_ships.json").read_text())["not_ships"]) or "0"
 
 _VESSEL_POSITIONS = (
-    f"SELECT * FROM read_parquet('{CLEAN_GLOB}', hive_partitioning=1)\n"
+    f"SELECT *, flag_country(mmsi) AS flag_country "
+    f"FROM read_parquet('{CLEAN_GLOB}', hive_partitioning=1)\n"
     f"  WHERE mmsi NOT IN ({_NOT_SHIPS}){_until_cap('AND')}" if USE_CLEAN else
-    f"""SELECT * REPLACE (CASE WHEN sog >= 102.2 THEN NULL ELSE sog END AS sog) FROM ais
+    f"""SELECT * REPLACE (CASE WHEN sog >= 102.2 THEN NULL ELSE sog END AS sog),
+  flag_country(mmsi) AS flag_country FROM ais
   WHERE mobile_type IN ('Class A', 'Class B')
     AND mmsi BETWEEN 200000000 AND 799999999
     AND lat BETWEEN 50 AND 64 AND lon BETWEEN -5 AND 32
@@ -93,11 +97,13 @@ if HAVE_VESSEL_DAYS and _STATIC_READ.exists():
     _VESSEL_DAYS_VIEW = (
         "CREATE VIEW vessel_days AS SELECT d.* REPLACE (coalesce(d.name, s.name) AS name, "
         "coalesce(d.ship_type, s.ship_type) AS ship_type, coalesce(d.imo, s.imo) AS imo, "
-        "coalesce(d.length, s.length) AS length, coalesce(d.width, s.width) AS width) "
+        "coalesce(d.length, s.length) AS length, coalesce(d.width, s.width) AS width), "
+        "flag_country(d.mmsi) AS flag_country "
         f"FROM {_VESSEL_DAYS} d LEFT JOIN read_parquet('{_STATIC_READ}') s USING (mmsi) "
         f"WHERE d.mmsi NOT IN ({_NOT_SHIPS}){_until_cap('AND', 'd.date')};")
 elif HAVE_VESSEL_DAYS:
-    _VESSEL_DAYS_VIEW = (f"CREATE VIEW vessel_days AS SELECT * FROM {_VESSEL_DAYS} "
+    _VESSEL_DAYS_VIEW = (f"CREATE VIEW vessel_days AS SELECT *, flag_country(mmsi) AS "
+                         f"flag_country FROM {_VESSEL_DAYS} "
                          f"WHERE mmsi NOT IN ({_NOT_SHIPS}){_until_cap('AND')};")
 else:
     _VESSEL_DAYS_VIEW = ""
@@ -126,8 +132,11 @@ _PORT_BOXES = [p["box"] for p in json.loads(
 _IN_PORT = " OR ".join(f"(lon BETWEEN {b[0]} AND {b[2]} AND lat BETWEEN {b[1]} AND {b[3]})"
                        for b in _PORT_BOXES) or "false"
 
+# flag_country(mmsi): the flag from the MMSI's first three digits (flags.py), also a column of
+# vessel_positions and vessel_days.
 SETUP_SQL = f"""
 CREATE MACRO in_port(lon, lat) AS ({_IN_PORT});
+CREATE MACRO flag_country(m) AS ({flags.flag_country_sql()});
 CREATE MACRO haversine_m(lat1, lon1, lat2, lon2) AS
   2 * 6371008.8 * asin(sqrt(
       pow(sin(radians(lat2 - lat1) / 2), 2)
