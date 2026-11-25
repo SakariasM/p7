@@ -36,10 +36,10 @@ $("type").innerHTML += SHIP_TYPES.map(type => `<option>${type}</option>`).join("
 getJson("/coverage").then(({ first_day: first, last_day: last }) => {
   Object.assign($("at"), { min: `${first}T00:00`, max: `${last}T23:59` });
   for (const id of ["route-from", "route-to"]) Object.assign($(id), { min: first, max: last });
-  const month = day => new Date(`${day}T00:00Z`)
-    .toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
-  $("period").textContent = `${month(first)}–${month(last)}`;
-}).catch(() => {});
+  const formatDay = day => new Date(`${day}T00:00Z`)
+    .toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+  $("period").textContent = `${formatDay(first)}–${formatDay(last)}`;
+}).catch(() => { $("period").textContent = "Data period unavailable"; });
 
 export function setHighlightedVessels(vessels) {
   highlightVersion++;
