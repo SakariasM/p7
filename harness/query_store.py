@@ -752,6 +752,7 @@ _CONCEPTS = {k: re.compile(v) for k, v in {
     "moving": r"\bmov(e|ing|ed)\b|\bunderway\b|\bunder way\b|\bsail(s|ed)?\b|\btransit"
               r"|\bpass|\bcross|\btravers|\bin motion\b|\bunder\b|\bwent\b",
     "anchor": r"\banchor",
+    "at_sea": r"\bat sea\b|\boffshore\b|\bnot in (a )?port\b",
     "moored": r"\bmoor",
     "speed": r"\bspeed|\bknots?\b|\bfast\b|\bslow\b",
     "length": r"\blength|\blong(est)?\b|\bsize\b|\bbig(gest)?\b|\blarge(st)?\b"
@@ -770,6 +771,12 @@ _CONCEPTS = {k: re.compile(v) for k, v in {
     "towing": r"\btowing\b",
 }.items()}
 _RANGE_RE = re.compile(r"(from|between) \{date1\} (to|and) \{date2\}")
+# A kind of vessel the wording names but that is no {type} slot ("tugboats", "leisure boats")
+# must agree too: "how many tugboats were in {place1}" matched "how many ships were in
+# {place1}" and counted all ships (69 instead of 5 tugs).
+_KIND_RE = re.compile(r"\b([a-z]+?)[ -]?(?:boat|ship|vessel|craft)s?\b")
+_NOT_KINDS = {"many", "the", "of", "all", "different", "distinct", "unique", "these", "those",
+              "which", "what", "any", "other", "no", "some", "more", "fewer", "most", "a", "an"}
 
 
 def _similar_key(alias: str) -> tuple | None:
@@ -786,7 +793,8 @@ def _similar_key(alias: str) -> tuple | None:
     plain = _SLOT_RE.sub(" ", alias)
     return (tuple(sorted(k + n for k, n in slots)),
             tuple(sorted(re.findall(r"\b\d+(?:\.\d+)?\b", plain))),
-            frozenset(k for k, rx in _CONCEPTS.items() if rx.search(plain)))
+            frozenset(k for k, rx in _CONCEPTS.items() if rx.search(plain)),
+            frozenset(k for k in _KIND_RE.findall(plain) if k not in _NOT_KINDS))
 
 
 def _embed(texts: list[str]):

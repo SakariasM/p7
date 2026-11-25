@@ -2280,18 +2280,13 @@
    ],
    "kind": "port",
    "box": [
-    11.373,
-    54.631,
-    11.391,
-    54.643
+    11.34,
+    54.649,
+    11.358,
+    54.66
    ],
-   "source": "locode+ais",
-   "locode": "DKROF",
-   "evidence": {
-    "moored_vessels": 8,
-    "sites": 1,
-    "locode_offset_km": 4.9
-   }
+   "country": "DK",
+   "source": "manual"
   },
   {
    "name": "Stubbekøbing",
