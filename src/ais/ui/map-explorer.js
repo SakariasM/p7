@@ -33,13 +33,39 @@ $("type").innerHTML += SHIP_TYPES.map(type => `<option>${type}</option>`).join("
 
 // The period with data grows by a day every night, so the pickers ask the server for it;
 // the limits written in index.html are only what shows until it answers.
-getJson("/coverage").then(({ first_day: first, last_day: last }) => {
+const coverageReady = getJson("/coverage").then(({ first_day: first, last_day: last }) => {
   Object.assign($("at"), { min: `${first}T00:00`, max: `${last}T23:59` });
   for (const id of ["route-from", "route-to"]) Object.assign($(id), { min: first, max: last });
   const formatDay = day => new Date(`${day}T00:00Z`)
     .toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
   $("period").textContent = `${formatDay(first)}–${formatDay(last)}`;
-}).catch(() => { $("period").textContent = "Data period unavailable"; });
+  return { first, last };
+}).catch(() => {
+  $("period").textContent = "Data period unavailable";
+  return null;
+});
+
+let snapshotTimeNotice = "";
+
+export async function setSnapshotTime(value, keepNotice = false) {
+  const coverage = await coverageReady;
+  if (!coverage) throw new Error("Data coverage unavailable. Cannot verify the snapshot date.");
+  const requested = value.slice(0, 16);
+  if (!requested || !Number.isFinite(Date.parse(`${requested}Z`))) {
+    throw new Error("Choose a valid snapshot date and time");
+  }
+  const day = requested.slice(0, 10);
+  const availableDay = day < coverage.first ? coverage.first : day > coverage.last ? coverage.last : day;
+  const selected = availableDay + requested.slice(10);
+  $("at").value = selected;
+  const changed = selected !== requested;
+  if (changed) {
+    snapshotTimeNotice = `Requested ${formatTimestamp(requested)} UTC is outside the data period; reset to ${formatTimestamp(selected)} UTC. `;
+  } else if (!keepNotice) {
+    snapshotTimeNotice = "";
+  }
+  return changed;
+}
 
 export function setHighlightedVessels(vessels) {
   highlightVersion++;
@@ -153,6 +179,12 @@ function selectedTimestamp() {
 }
 
 export async function loadSnapshot({ area } = {}) {
+  try {
+    await setSnapshotTime($("at").value, true);
+  } catch (error) {
+    setStatus("snap-status", error.message, true);
+    return;
+  }
   const bounds = map.getBounds();
   const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
   const bbox = [
@@ -160,6 +192,7 @@ export async function loadSnapshot({ area } = {}) {
     clamp(bounds.getEast(), -180, 180), clamp(bounds.getNorth(), -90, 90),
   ].map(value => value.toFixed(4)).join(",");
   const at = selectedTimestamp();
+  const timeNotice = snapshotTimeNotice;
   $("snap").disabled = true;
   setStatus("snap-status", `Loading ships · ${formatTimestamp(at)} UTC`);
   const started = performance.now();
@@ -196,7 +229,7 @@ export async function loadSnapshot({ area } = {}) {
     const capped = snapshot.truncated ? " · capped at 5,000; zoom in" : "";
     setStatus(
       "snap-status",
-      `${snapshot.items.length.toLocaleString()} ships · ${formatTimestamp(at)} UTC${filterLabel ? ` · ${filterLabel}` : ""}${capped} · ${seconds}s`,
+      `${timeNotice}${snapshot.items.length.toLocaleString()} ships · ${formatTimestamp(snapshot.at || at)} UTC${filterLabel ? ` · ${filterLabel}` : ""}${capped} · ${seconds}s`,
     );
   } catch (error) {
     setStatus("snap-status", error.message, true);
@@ -206,6 +239,7 @@ export async function loadSnapshot({ area } = {}) {
 }
 
 $("snap").addEventListener("click", () => loadSnapshot());
+$("at").addEventListener("input", () => { snapshotTimeNotice = ""; });
 $("presets").addEventListener("click", event => {
   const button = event.target.closest("button");
   if (!button) return;

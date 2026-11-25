@@ -110,6 +110,7 @@
             <button id="ask-clear" class="secondary compact" type="button">Clear chat and view</button>
           </div>
           <div id="ask-status" class="status" role="status"></div>
+          <p id="history-status" class="helper" role="status" hidden></p>
         </div>
       </div>
     </aside>
@@ -118,7 +119,6 @@
       <article class="chat-turn">
         <div class="chat-user" role="group" aria-label="Your question">
           <p class="chat-question"></p>
-          <span class="chat-area-note" hidden>Selected area attached</span>
         </div>
         <div class="chat-reply" role="group" aria-label="Data assistant">
           <p class="chat-turn-status status"></p>
@@ -128,7 +128,7 @@
             <span class="feedback-text">Was this answer right?</span>
             <span class="feedback-buttons"><button class="link feedback-yes" type="button">Yes</button> · <button class="link feedback-no" type="button">No</button></span>
             <div class="feedback-form form-row" hidden>
-              <input aria-label="Feedback note" placeholder="What was wrong? (optional)">
+              <input aria-label="Feedback note" placeholder="Add a comment (optional)">
               <button class="compact" type="button">Send</button>
             </div>
           </div>

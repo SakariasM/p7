@@ -1186,6 +1186,7 @@ _MONTH_YEAR_RE = re.compile(
     r"[a-z]*\.?,?\s+(\d{4})\b"
     r"|\b(\d{4})-(\d{1,2})(?:-\d{1,2})?\b", re.IGNORECASE)
 _YEAR_RE = re.compile(r"\b(19\d\d|20\d\d)\b")
+_NUMERIC_DAY_RE = re.compile(r"\b(\d{1,2})\s*([/.-])\s*(\d{1,2})\s*\2\s*(\d{4})\b")
 _NUMBER_WORDS = {"a": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
                  "seven": 7, "few": 3, "couple of": 2}
 _SMALL = r"(\d+|two|three|four|five|six|seven|few|couple of)"
@@ -1248,7 +1249,7 @@ def resolve_relative(question: str) -> tuple[str, str | None]:
 
 def period_problem(question: str) -> tuple[str | None, str | None]:
     """(reply, note): a reply when the question is only about times the data lacks; a note
-    for the answer when it names a year the data covers only in part (e.g. "in 2025")."""
+    for the answer when it requests a whole year the data covers only in part."""
     if CURRENT_DAY is None:
         m = _RELATIVE_RE.search(question)
         if m:
@@ -1256,6 +1257,13 @@ def period_problem(question: str) -> tuple[str | None, str | None]:
                     f'answer for "{m.group(1)}". Ask about a date in that period, for example '
                     f"{day_text(LAST_DAY)}, the latest day.", None)
     outside, inside = [], []
+    # A year inside a day/month/year date is not a request for the whole year.
+    for m in _NUMERIC_DAY_RE.finditer(question):
+        try:
+            day = date(int(m.group(4)), int(m.group(3)), int(m.group(1)))
+        except ValueError:
+            continue
+        (inside if FIRST_DAY <= day <= LAST_DAY else outside).append(m.group(0))
     for m in _MONTH_YEAR_RE.finditer(question):
         if m.group(5):
             year, month = int(m.group(5)), int(m.group(6))
@@ -1269,21 +1277,19 @@ def period_problem(question: str) -> tuple[str | None, str | None]:
     if outside:
         return None, (f"Note: the data covers {PERIOD_TEXT}; {', '.join(outside)} lies outside "
                       f"it, so only the part inside the period is answered.")
-    rest = _MONTH_YEAR_RE.sub(" ", question)
+    rest = _MONTH_YEAR_RE.sub(" ", _NUMERIC_DAY_RE.sub(" ", question))
     years = sorted({int(y) for y in _YEAR_RE.findall(rest)})
     if years and all(y < DATA_FIRST[0] or y > DATA_LAST[0] for y in years):
         return (f"The data covers {PERIOD_TEXT}, so there is no data for "
                 f"{' or '.join(map(str, years))}. Ask about a date in that period.", None)
     partial = []
     for y in years:
-        first = (y, 1) if (y, 1) >= DATA_FIRST else DATA_FIRST
-        last = (y, 12) if (y, 12) <= DATA_LAST else DATA_LAST
-        if first[0] == y == last[0] and (first[1], last[1]) != (1, 12):
-            partial.append(f"{y} only {_MONTH_NAMES[first[1] - 1]}-{_MONTH_NAMES[last[1] - 1]} "
-                           f"{y}")
+        first = max(date(y, 1, 1), FIRST_DAY)
+        last = min(date(y, 12, 31), LAST_DAY)
+        if first <= last and (first != date(y, 1, 1) or last != date(y, 12, 31)):
+            partial.append(f"Data for {y} covers {day_text(first)} to {day_text(last)} (UTC)")
     if partial:
-        return None, (f"Note: the data covers {PERIOD_TEXT}, so this covers "
-                      f"{'; '.join(partial).replace(' only ', ': only ')}.")
+        return None, "Note: " + ". ".join(partial) + "."
     return None, None
 
 
