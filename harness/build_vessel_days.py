@@ -13,7 +13,7 @@ Per vessel and day:
                                       an hour apart and at most MAX_STEP_KNOTS (a faster step
                                       is a position jump: KBV 490 on 1 Sep 2026 had 59 steps
                                       over 60 knots and 726 km instead of about 105)
-  max_sog, avg_sog                    highest and average speed over the reports (knots)
+  max_sog, avg_sog                    top speed held over two reports, average speed (knots)
   places                              named places (places.json) with at least one report
   still_in                            ... where it lay still (sog < 0.5): docked / harbored
   moving_in                           ... where it moved (sog >= 1): e.g. under a bridge
@@ -101,7 +101,12 @@ def build_day(con: duckdb.DuckDBPyConnection, day: str) -> dict:
                    max(width) FILTER (WHERE width BETWEEN 1 AND {MAX_WIDTH_M}) AS width,
                    max(draught) FILTER (WHERE draught > 0) AS draught,
                    count(DISTINCT ts) AS reports, min(ts) AS first_ts, max(ts) AS last_ts,
-                   max(sog) AS max_sog, round(avg(sog), 2) AS avg_sog
+                   -- the top speed two distinct reports reached (one corrupt report made
+                   -- CENTURION the fastest tanker on 5 May 2026); the highest with one report
+                   coalesce(list_reverse_sort(list_transform(list_distinct(
+                       list(struct_pack(t := ts, s := sog)) FILTER (WHERE sog IS NOT NULL)),
+                       x -> x.s))[2], max(sog)) AS max_sog,
+                   round(avg(sog), 2) AS avg_sog
             FROM p GROUP BY mmsi
           ), inside AS (
             SELECT p.mmsi, pl.name AS place, bool_or(p.sog < 0.5) AS still,
