@@ -64,6 +64,9 @@ if _DATES and not USE_CLEAN:
 _NOT_SHIPS = ", ".join(str(s["mmsi"]) for s in json.loads(
     Path(__file__).with_name("not_ships.json").read_text())["not_ships"]) or "0"
 
+# A report without a ship type ('Undefined': no static message from the ship that day) gets
+# its type from vessel_days, as that table counts it: otherwise "fishing vessels on
+# 1 March 2026" were 448 on vessel_positions and 471 on vessel_days. Defined further down.
 _VESSEL_POSITIONS = (
     f"SELECT *, flag_country(mmsi) AS flag_country "
     f"FROM read_parquet('{CLEAN_GLOB}', hive_partitioning=1)\n"
@@ -93,6 +96,21 @@ VESSEL_STATIC_FILE = PROJECT_DIR / "data" / "derived" / "vessel_static" / "vesse
 _STATIC_AS_OF = VESSEL_STATIC_FILE.with_name(f"vessel_static_{LAST_DAY_CAP}.parquet")
 _STATIC_READ = _STATIC_AS_OF if LAST_DAY_CAP and _STATIC_AS_OF.exists() else VESSEL_STATIC_FILE
 _VESSEL_DAYS = f"read_parquet('{VESSEL_DAYS_GLOB}', hive_partitioning=1)"
+if USE_CLEAN and _STATIC_READ.exists():
+    # The type a report without one gets is the ship's type in vessel_days that day (the day's
+    # most common type, else its usual one), so both tables count the same ships: the year's
+    # usual type alone made SKINFAXE R, 'Towing' that day, a tug in the Kattegat on 12 Oct 2026.
+    _DAY_TYPE = (
+        f"(SELECT d.mmsi, d.date, coalesce(d.ship_type, s.ship_type) AS ship_type FROM "
+        f"{_VESSEL_DAYS} d LEFT JOIN read_parquet('{_STATIC_READ}') s USING (mmsi)) t "
+        "USING (mmsi, date)" if HAVE_VESSEL_DAYS else
+        f"(SELECT mmsi, ship_type FROM read_parquet('{_STATIC_READ}')) t USING (mmsi)")
+    _VESSEL_POSITIONS = (
+        "SELECT p.* REPLACE (CASE WHEN p.ship_type IS NULL OR p.ship_type IN "
+        "('Undefined', 'Unknown value', '') THEN coalesce(t.ship_type, p.ship_type) "
+        "ELSE p.ship_type END AS ship_type), flag_country(p.mmsi) AS flag_country "
+        f"FROM read_parquet('{CLEAN_GLOB}', hive_partitioning=1) p LEFT JOIN {_DAY_TYPE}\n"
+        f"  WHERE p.mmsi NOT IN ({_NOT_SHIPS}){_until_cap('AND', 'p.date')}")
 if HAVE_VESSEL_DAYS and _STATIC_READ.exists():
     _VESSEL_DAYS_VIEW = (
         "CREATE VIEW vessel_days AS SELECT d.* REPLACE (coalesce(d.name, s.name) AS name, "
@@ -134,9 +152,16 @@ _IN_PORT = " OR ".join(f"(lon BETWEEN {b[0]} AND {b[2]} AND lat BETWEEN {b[1]} A
 
 # flag_country(mmsi): the flag from the MMSI's first three digits (flags.py), also a column of
 # vessel_positions and vessel_days.
+# held_max_sog(list(struct_pack(t := ts, s := sog))): a top speed that two different reports
+# reached (the second-highest speed over the distinct reports, the highest when there is one):
+# one corrupt report made CENTURION the fastest tanker on 5 May 2026 at 43 knots. vessel_days
+# max_sog is built the same way.
 SETUP_SQL = f"""
 CREATE MACRO in_port(lon, lat) AS ({_IN_PORT});
 CREATE MACRO flag_country(m) AS ({flags.flag_country_sql()});
+CREATE MACRO held_max_sog(l) AS coalesce(
+  list_reverse_sort(list_transform(list_distinct(list_filter(l, x -> x.s IS NOT NULL)), x -> x.s))[2],
+  list_max(list_transform(l, x -> x.s)));
 CREATE MACRO haversine_m(lat1, lon1, lat2, lon2) AS
   2 * 6371008.8 * asin(sqrt(
       pow(sin(radians(lat2 - lat1) / 2), 2)

@@ -620,7 +620,7 @@ def repair_sql(sql: str, request: str, asked: str, question: str, named: list[pl
     called nautical miles). Each repair leaves SQL it does not recognise unchanged."""
     sql = days_to_positions(fix_place_lists(fix_years(sql, request)))
     for repair in (per_day_counts, moving_filter, docked_filter, every_day, ships_not_reports,
-                   ranking_order, at_sea_filter):
+                   ranking_order, at_sea_filter, held_top_speed):
         sql = repair(sql, request)
     sql = per_ship_average(fix_distance(sql, bool(_NAUTICAL_RE.search(f"{request} {question}"))))
     sql = flag_query(destination_filter(sql, request, named), request)
@@ -1315,6 +1315,36 @@ _AVG_SIZE_RE = re.compile(
     r"^\s*SELECT\s+(?:round\(\s*)?avg\(\s*(length|width|draught)\s*\)(\s*,\s*\d+\s*\))?\s+AS\s+(\w+)"
     r"\s+FROM\s+(vessel_positions|vessel_days)\s+WHERE\s+(.+?)\s*;?\s*$", re.IGNORECASE | re.DOTALL)
 _SIZE_RANGE = {"length": "BETWEEN 1 AND 400", "width": "BETWEEN 1 AND 80", "draught": "> 0"}
+
+
+_TOP_SPEED_ASKED_RE = re.compile(
+    r"\b(?:fast(?:er|est)|quick(?:er|est)|(?:top|max(?:imum)?|highest|peak|greatest)\s+speed)\b",
+    re.IGNORECASE)
+_MAX_SOG_RE = re.compile(r"\bmax\(\s*sog\s*\)", re.IGNORECASE)
+_HELD = "held_max_sog(list(struct_pack(t := ts, s := sog)))"
+_ONE_SHIP_RE = re.compile(r"\b(?:name|mmsi)\s*(?:=|IN\s*\()", re.IGNORECASE)
+_PLAIN_MAX_RE = re.compile(r"^\s*SELECT\s+max\(\s*sog\s*\)(\s+AS\s+\w+)?\s+FROM\s+vessel_positions\b"
+                           r"(?P<rest>(?:(?!\b(?:GROUP|ORDER|LIMIT|UNION|JOIN|SELECT)\b).)*)$",
+                           re.IGNORECASE | re.DOTALL)
+
+
+def held_top_speed(sql: str, request: str) -> str:
+    """A ship's top speed is one that two different reports reached (held_max_sog), not one
+    report: a single corrupt report made CENTURION the fastest tanker on 5 May 2026 at
+    43 knots (13.8 held). Per ship (GROUP BY or one named ship) max(sog) becomes the held top speed;
+    the top speed of all ships in a place becomes the highest of the ships' held speeds."""
+    if (not _TOP_SPEED_ASKED_RE.search(request) or not _MAX_SOG_RE.search(sql)
+            or not re.search(r"\bvessel_positions\b", sql, re.IGNORECASE)
+            or re.search(r"\bvessel_days\b", sql, re.IGNORECASE)):
+        return sql
+    if re.search(r"\bGROUP\s+BY\b", sql, re.IGNORECASE) or _ONE_SHIP_RE.search(sql):
+        return _MAX_SOG_RE.sub(_HELD, sql)
+    m = _PLAIN_MAX_RE.match(sql.rstrip().rstrip(";"))
+    if not m:
+        return sql
+    alias = m.group(1) or " AS max_sog"
+    return (f"SELECT max(held){alias} FROM (\n  SELECT mmsi, {_HELD} AS held\n"
+            f"  FROM vessel_positions{m.group('rest').rstrip()}\n  GROUP BY mmsi\n)")
 
 
 def per_ship_average(sql: str) -> str:
