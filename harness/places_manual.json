@@ -31,6 +31,7 @@
   {"name": "Christiansø", "aliases": ["Christianso", "Ertholmene"], "kind": "port", "box": [15.181, 55.315, 15.191, 55.325], "country": "DK"},
   {"name": "Skive", "aliases": [], "kind": "port", "box": [9.048, 56.567, 9.058, 56.579], "country": "DK"},
   {"name": "Great Belt Bridge", "aliases": ["Storebæltsbroen", "Storebaeltsbroen", "Storebælt Bridge", "Great Belt bridges"], "kind": "area", "box": [10.855, 55.3, 11.09, 55.355]},
+  {"name": "Øresund Bridge", "aliases": ["Oresund Bridge", "Öresund Bridge", "Øresundsbroen", "Oresundsbroen", "Öresundsbron", "Oresundsbron", "the Øresund Bridge", "Øresund bridges"], "kind": "area", "box": [12.755, 55.56, 12.915, 55.6]},
   {"name": "Little Belt bridges", "aliases": ["Lillebæltsbroen", "Lillebaeltsbroen", "Little Belt Bridge", "Lillebælt bridges"], "kind": "area", "box": [9.66, 55.495, 9.74, 55.525]}
  ]
 }

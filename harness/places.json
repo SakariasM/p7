@@ -435,6 +435,27 @@
    "source": "manual"
   },
   {
+   "name": "Øresund Bridge",
+   "aliases": [
+    "Oresund Bridge",
+    "Öresund Bridge",
+    "Øresundsbroen",
+    "Oresundsbroen",
+    "Öresundsbron",
+    "Oresundsbron",
+    "the Øresund Bridge",
+    "Øresund bridges"
+   ],
+   "kind": "area",
+   "box": [
+    12.755,
+    55.56,
+    12.915,
+    55.6
+   ],
+   "source": "manual"
+  },
+  {
    "name": "Little Belt bridges",
    "aliases": [
     "Lillebæltsbroen",
