@@ -336,6 +336,23 @@ def tidy_answer(text: str) -> str:
 
 _ASKS_USER_RE = re.compile(r"\bplease (?:provide|specify|give|tell|clarify|confirm)\b|\bcould you\b|"
                            r"\bwhich \w+(?: \w+)? do you mean\b|\bdo you mean\b", re.IGNORECASE)
+_NOT_A_VALUE_RE = re.compile(r"^'([^']+)' is not a ship_type value in the data")
+
+
+def with_substitution_note(answer: str, steps: list[dict]) -> str:
+    """A note when a ship type the data does not have was answered with another: "how many
+    submarines were in Esbjerg" was rejected ('Submarine' is no ship_type) and answered as
+    "0 Military vessels" without saying the question had been changed."""
+    missing = [m.group(1) for st in steps
+               for m in [_NOT_A_VALUE_RE.match(str((st.get("result") or {}).get("error", "")))] if m]
+    used = [t for st in steps if "error" not in (st.get("result") or {})
+            for t in re.findall(r"\bship_type\s*=\s*'([^']+)'", st.get("sql") or "")]
+    if not missing or not used or missing[-1].lower() in answer.lower():
+        return answer
+    return (f"{answer}\n\nNote: '{missing[-1]}' is not a ship type in AIS data, so this counts "
+            f"{used[-1]} ships instead.")
+
+
 _PLAN_ONLY_RE = re.compile(r"\s*(?:\*\*)?plan\b", re.IGNORECASE)
 
 
@@ -613,6 +630,7 @@ def repair_sql(sql: str, request: str, asked: str, question: str, named: list[pl
         sql = build(sql, both)
     sql = time_window(weekday_query(month_query(top_n_query(arrivals_query(sql, request), request),
                                                 request), request), request)
+    sql = across_midnight(sql)
     if area in named:
         sql = precise_area_box(area_in_positions(sql, area, request), area)
     return names_to_mmsi(sql)
@@ -655,7 +673,9 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
         result = {"error": f"'{value}' is not a {column} value in the data. "
                            + (f"Ask again with {column} {likely} instead. " if likely else "")
                            + f"Valid values: {', '.join(sorted(VALID_VALUES[column]))}. "
-                             f"Rephrase the request yourself; do not ask the user."}
+                             f"Rephrase the request yourself; do not ask the user. If you use "
+                             f"another value, say in the answer that '{value}' is not in AIS data "
+                             f"and which value you counted instead."}
     elif stray:
         # Name the right boxes: the planner once copied the wrong box from this message.
         result = {"error": "The SQL used an area that is not a place named in the request. "
@@ -967,6 +987,21 @@ _BETWEEN_TIMES_RE = re.compile(r"\bbetween\s+(\d{1,2}):(\d{2})(?:\s*UTC)?\s+and\
 _SNAPSHOT_RE = re.compile(
     r"ts\s*>\s*TIMESTAMP\s*'(\d{4}-\d{2}-\d{2}) \d{2}:\d{2}:\d{2}'\s*-\s*INTERVAL\s+10\s+MINUTES?\s+AND\s+"
     r"ts\s*<=\s*TIMESTAMP\s*'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}'", re.IGNORECASE)
+
+
+_SNAPSHOT_DAY_RE = re.compile(
+    r"\bdate\s*=\s*DATE\s*'(\d{4}-\d{2}-\d{2})'(?=(?:(?!\bdate\b).)*?ts\s*>\s*TIMESTAMP\s*'\1 "
+    r"00:0\d:\d{2}'\s*-\s*INTERVAL\s+10\s+MINUTES?)", re.IGNORECASE | re.DOTALL)
+
+
+def across_midnight(sql: str) -> str:
+    """A snapshot just after midnight also reads the day before: "where was TYCHO BRAHE at 00:00
+    UTC on 4 March 2026" filtered date = 4 March, so the window 23:50-00:00 lost its part before
+    midnight and found nothing (its last report was at 23:59:44 on 3 March)."""
+    def both(m: re.Match) -> str:
+        day = date.fromisoformat(m.group(1))
+        return f"date BETWEEN DATE '{day - timedelta(days=1)}' AND DATE '{day}'"
+    return _SNAPSHOT_DAY_RE.sub(both, sql)
 
 
 def time_window(sql: str, request: str) -> str:
@@ -1795,7 +1830,7 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
                     r"\b(?:not|cannot|can't|unable|no|none)\b", answer, re.IGNORECASE))):
                 # every query failed: the planner once answered "Denmark" with nothing found
                 answer = gave_up(steps)
-            answer = tidy_answer(answer)
+            answer = tidy_answer(with_substitution_note(answer, steps))
             if return_trace:
                 return {"answer": answer, "plan": plan, "tool_calls": steps,
                         "place_calls": place_calls}
