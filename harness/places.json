@@ -287,7 +287,11 @@
   {
    "name": "Danish North Sea",
    "aliases": [
-    "North Sea (Danish waters)"
+    "North Sea (Danish waters)",
+    "North Sea",
+    "the North Sea",
+    "Nordsøen",
+    "Nordsoen"
    ],
    "kind": "area",
    "box": [

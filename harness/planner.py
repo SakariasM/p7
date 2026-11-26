@@ -585,6 +585,7 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
     does not have, it runs through query_ais_data. question is the user's question when the
     planner wrote the request: a unit it asks for (nautical miles) holds even if the request
     leaves it out."""
+    asked = request  # as written: own_place_names turns "AURORA AF HELSINGBORG" into "... Helsingborg"
     request = plain_words(spell_out(respell_places(request)))
     area = selected_area(session)
     session = (session or []) + ([area] if area and area not in (session or []) else [])
@@ -599,10 +600,15 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
     written = cap_lengths(extract_sql(response.choices[0].message.content))
-    sql = fix_distance(ships_not_reports(every_day(moving_filter(per_day_counts(
-        fix_place_lists(fix_years(written, request)), request), request), request), request),
-                       bool(_NAUTICAL_RE.search(f"{request} {question}")))
+    sql = days_to_positions(fix_place_lists(fix_years(written, request)))
+    for repair in (per_day_counts, moving_filter, docked_filter, every_day, ships_not_reports):
+        sql = repair(sql, request)  # each leaves SQL it does not recognise unchanged
+    sql = per_ship_average(fix_distance(sql, bool(_NAUTICAL_RE.search(f"{request} {question}"))))
     sql = flag_query(destination_filter(sql, request, named), request)
+    both = f"{asked}\n{request}"  # vessel names as written, dates with the years spelled out
+    for build in (duplicates_query, nearby_query, closest_query, placeholder_mmsi):
+        sql = build(sql, both)
+    sql = time_window(month_query(sql, request), request)
     if area in named:
         sql = precise_area_box(area_in_positions(sql, area, request), area)
     sql = names_to_mmsi(sql)
@@ -805,6 +811,175 @@ def flag_query(sql: str, request: str) -> str:
             f"LIMIT {limit}")
 
 
+def _date_condition(sql: str, request: str) -> str | None:
+    """The SQL's date filter (date = ... or date BETWEEN ...), else one from the request's dates."""
+    m = re.search(r"\bdate\s*=\s*DATE\s*'\d{4}-\d{2}-\d{2}'|\bdate\s+BETWEEN\s+DATE\s*'\d{4}-\d{2}-"
+                  r"\d{2}'\s+AND\s+DATE\s*'\d{4}-\d{2}-\d{2}'", sql, re.IGNORECASE)
+    if m:
+        return m.group(0)
+    days = sorted(dates_with_year(request))
+    if not days:
+        return None
+    return (f"date = DATE '{days[0]}'" if len(days) == 1 else
+            f"date BETWEEN DATE '{days[0]}' AND DATE '{days[-1]}'")
+
+
+def duplicates_query(sql: str, request: str) -> str:
+    """Duplicate reports counted, on the raw rows (the ais table, for data quality): "how many
+    duplicate position reports (same ship, same timestamp) were there on 1 May 2026" returned
+    one row per duplicated report, cut at the row limit, and was worded as 100."""
+    if not re.search(r"\bduplicat", request, re.IGNORECASE) or not re.search(
+            r"\bGROUP\s+BY\s+(?:mmsi\s*,\s*ts|ts\s*,\s*mmsi)\b", sql, re.IGNORECASE):
+        return sql
+    when = _date_condition(sql, request)
+    if not when:
+        return sql
+    return ("SELECT count(*) AS duplicated_reports, sum(n) - count(*) AS extra_rows FROM (\n"
+            f"  SELECT mmsi, ts, count(*) AS n FROM ais WHERE {when}\n"
+            "  GROUP BY mmsi, ts HAVING count(*) > 1\n)")
+
+
+def _vessel_mmsi(name: str) -> int | None:
+    """The MMSI of the one vessel with this name; AIS names stop at 20 characters, so
+    "AURORA AF HELSINGBORG" is sent as "AURORA AF HELSINGBOR"."""
+    key = " ".join(name.upper().split())
+    for candidate in dict.fromkeys((key, key[:20].rstrip())):
+        found = query_ais_data(f"SELECT DISTINCT mmsi FROM vessel_days WHERE name = "
+                               f"'{candidate.replace(chr(39), chr(39) * 2)}' LIMIT 2").get("rows") or []
+        if found:
+            return int(found[0][0]) if len(found) == 1 else None
+    return None
+
+
+_NEARBY_RE = re.compile(
+    r"\bwithin\s+([\d.]+)\s*(nautical miles?|nm|km|kilomet(?:er|re)s?|m|met(?:er|re)s?)\s+of\s+"
+    r"(?:the\s+)?(.+?)\s+at\s+(\d{1,2}):(\d{2})", re.IGNORECASE)
+_TO_METRES = {"n": 1852.0, "k": 1000.0, "m": 1.0}
+
+
+def nearby_query(sql: str, request: str) -> str:
+    """Ships within a distance of a named vessel AT a moment: each ship's latest report in the
+    10 minutes before, as for any moment. "Which ships were within 2 nautical miles of TYCHO
+    BRAHE at 12:00" compared positions minute by minute from 12:00 to 13:00 (23 ships came that
+    close at some minute; 8 were at 12:00)."""
+    m = _NEARBY_RE.search(request)
+    days = sorted(dates_with_year(request))
+    if not m or len(days) != 1:
+        return sql
+    unit = m.group(2).lower()
+    metres = float(m.group(1)) * _TO_METRES["n" if unit.startswith(("n", "nautical")) else
+                                            "k" if unit.startswith("k") else "m"]
+    mmsi = _vessel_mmsi(m.group(3).strip())
+    if mmsi is None:
+        return sql
+    at = f"TIMESTAMP '{days[0]} {int(m.group(4)):02d}:{m.group(5)}:00'"
+    return ("WITH s AS (\n"
+            "  SELECT mmsi, arg_max(name, ts) AS name, arg_max(lat, ts) AS lat, arg_max(lon, ts) AS lon\n"
+            f"  FROM vessel_positions WHERE date = DATE '{days[0]}'\n"
+            f"    AND ts > {at} - INTERVAL 10 MINUTE AND ts <= {at}\n"
+            "  GROUP BY mmsi\n"
+            f"), t AS (SELECT lat, lon FROM s WHERE mmsi = {mmsi})\n"
+            "SELECT s.mmsi, s.name, round(haversine_m(s.lat, s.lon, t.lat, t.lon)) AS distance_m\n"
+            f"FROM s, t WHERE s.mmsi <> {mmsi} AND haversine_m(s.lat, s.lon, t.lat, t.lon) <= {metres:g}\n"
+            "ORDER BY distance_m, s.mmsi")
+
+
+_PLACEHOLDER_MMSI_RE = re.compile(r"\bmmsi\s*=\s*([1-9]\d{0,4})\b", re.IGNORECASE)
+_CAPS_NAME_RE = re.compile(r"\b[A-ZÆØÅÖÄÜ][A-ZÆØÅÖÄÜ0-9.\-]*(?:\s+[A-ZÆØÅÖÄÜ0-9][A-ZÆØÅÖÄÜ0-9.\-]*)*\b")
+
+
+def placeholder_mmsi(sql: str, request: str) -> str:
+    """mmsi = 1, mmsi = 2 (no real MMSI) as the MMSIs of the vessels the request names in
+    capitals, in order: "how close did TYCHO BRAHE and AURORA AF HELSINGBORG come to each other"
+    was written with mmsi = 1 and mmsi = 2 and found nothing."""
+    holders = list(dict.fromkeys(_PLACEHOLDER_MMSI_RE.findall(sql)))
+    if not holders:
+        return sql
+    mmsis = [m for m in (_vessel_mmsi(n) for n in _CAPS_NAME_RE.findall(request)
+                         if len(n) >= 3) if m]
+    if len(mmsis) < len(holders):
+        return sql
+    by_holder = dict(zip(sorted(holders, key=int), mmsis))
+    return _PLACEHOLDER_MMSI_RE.sub(lambda h: f"mmsi = {by_holder.get(h.group(1), h.group(1))}", sql)
+
+
+_CLOSEST_RE = re.compile(r"\bhow close did\s+(?:the\s+)?(.+?)\s+and\s+(?:the\s+)?(.+?)\s+"
+                         r"(?:come|get|pass|sail)\b", re.IGNORECASE)
+
+
+def closest_query(sql: str, request: str) -> str:
+    """How close two named vessels came on a day, and when: positions per minute (each
+    vessel's latest report in the minute), the smallest distance first. The student wrote
+    mmsi = 1 and mmsi = 2 for TYCHO BRAHE and AURORA AF HELSINGBORG and a CTE it never
+    defined; the answer is 51 m."""
+    m = _CLOSEST_RE.search(request)
+    days = sorted(dates_with_year(request))
+    if not m or len(days) != 1:
+        return sql
+    a, b = _vessel_mmsi(m.group(1).strip()), _vessel_mmsi(m.group(2).strip())
+    if not a or not b or a == b:
+        return sql
+    return ("WITH m AS (\n"
+            "  SELECT mmsi, date_trunc('minute', ts) AS minute, arg_max(lat, ts) AS lat,\n"
+            "         arg_max(lon, ts) AS lon\n"
+            f"  FROM vessel_positions WHERE date = DATE '{days[0]}' AND mmsi IN ({a}, {b})\n"
+            "  GROUP BY 1, 2\n)\n"
+            "SELECT x.minute AS minute_utc, round(haversine_m(x.lat, x.lon, y.lat, y.lon)) AS distance_m\n"
+            f"FROM m x JOIN m y ON x.minute = y.minute AND x.mmsi = {a} AND y.mmsi = {b}\n"
+            "ORDER BY distance_m, minute_utc LIMIT 5")
+
+
+_BETWEEN_TIMES_RE = re.compile(r"\bbetween\s+(\d{1,2}):(\d{2})(?:\s*UTC)?\s+and\s+(\d{1,2}):(\d{2})",
+                               re.IGNORECASE)
+_SNAPSHOT_RE = re.compile(
+    r"ts\s*>\s*TIMESTAMP\s*'(\d{4}-\d{2}-\d{2}) \d{2}:\d{2}:\d{2}'\s*-\s*INTERVAL\s+10\s+MINUTES?\s+AND\s+"
+    r"ts\s*<=\s*TIMESTAMP\s*'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}'", re.IGNORECASE)
+
+
+def time_window(sql: str, request: str) -> str:
+    """A period "between 08:00 and 10:00" written as the 10-minute snapshot at one moment (the
+    average width of the tankers moving through the Great Belt between 08:00 and 10:00 used
+    09:50-10:00 only) gets the period asked for."""
+    w = _BETWEEN_TIMES_RE.search(request)
+    if not w:
+        return sql
+    def period(m: re.Match) -> str:
+        day = m.group(1)
+        return (f"ts >= TIMESTAMP '{day} {int(w.group(1)):02d}:{w.group(2)}:00' AND "
+                f"ts < TIMESTAMP '{day} {int(w.group(3)):02d}:{w.group(4)}:00'")
+    return _SNAPSHOT_RE.sub(period, sql)
+
+
+_MONTH_RANK_RE = re.compile(r"\b(?:which|what)\s+month\b", re.IGNORECASE)
+
+
+def month_query(sql: str, request: str) -> str:
+    """The month with the most (or fewest) different ships, counted per month on vessel_days:
+    the student has no such query ("which month had the most different ships in the whole
+    dataset" became an unrelated count, 2765). Place and ship type from the request and SQL."""
+    if not _MONTH_RANK_RE.search(request) or re.search(r"strftime|date_trunc\(\s*'month'|month\(",
+                                                        sql, re.IGNORECASE):
+        return sql
+    fewest = re.search(r"\b(?:fewest|least|quietest|lowest)\b", request, re.IGNORECASE)
+    where = []
+    days = sorted(dates_with_year(request))
+    if len(days) >= 2:
+        where.append(f"date BETWEEN DATE '{days[0]}' AND DATE '{days[-1]}'")
+    named = places.mentioned(request, places.load())
+    if len(named) > 1:
+        return sql
+    if named:
+        column = ("still_in" if _STILL_ASKED_RE.search(request) else
+                  "moving_in" if _MOVING_ASKED_RE.search(request) else "places")
+        where.append(f"list_contains({column}, '{named[0].name.replace(chr(39), chr(39) * 2)}')")
+    types = set(re.findall(r"\bship_type\s*=\s*'([^']+)'", sql))
+    if len(types) == 1:
+        where.append(f"ship_type = '{types.pop()}'")
+    return ("SELECT strftime(date, '%Y-%m') AS month, count(DISTINCT mmsi) AS vessels\n"
+            "FROM vessel_days" + (f"\nWHERE {' AND '.join(where)}" if where else "") +
+            f"\nGROUP BY month ORDER BY vessels {'ASC' if fewest else 'DESC'}, month LIMIT 3")
+
+
 def per_day_counts(sql: str, request: str) -> str:
     """A count over a date range asked for each day, as one count per date. "How many ships
     docked at Helsingør on each day from 1 to 7 June 2026?" got one number, 294: the daily
@@ -828,7 +1003,7 @@ def per_day_counts(sql: str, request: str) -> str:
             f"GROUP BY date ORDER BY date")
 
 
-_ALL_DAYS_RE = re.compile(r"\b(?:on|for) every (?:single )?day\b|\bon all (?:the |\w+ )?days\b"
+_ALL_DAYS_RE = re.compile(r"\b(?:on|for) every (?:single )?day\b|\bon all (?:of )?(?:the |\w+ )?days\b"
                           r"|\bevery day (?:of|from|between)\b|\bon each of the days\b",
                           re.IGNORECASE)
 _DATE_RANGE_RE = re.compile(r"\bdate\s+BETWEEN\s+DATE\s+'(\d{4}-\d{2}-\d{2})'\s+AND\s+"
@@ -924,9 +1099,45 @@ def destination_filter(sql: str, request: str, named: list) -> str:
     return re.sub(r"\bWHERE\b", f"WHERE {cond} AND", sql, count=1, flags=re.IGNORECASE)
 
 
+_AVG_SIZE_RE = re.compile(
+    r"^\s*SELECT\s+(?:round\(\s*)?avg\(\s*(length|width|draught)\s*\)(\s*,\s*\d+\s*\))?\s+AS\s+(\w+)"
+    r"\s+FROM\s+(vessel_positions|vessel_days)\s+WHERE\s+(.+?)\s*;?\s*$", re.IGNORECASE | re.DOTALL)
+_SIZE_RANGE = {"length": "BETWEEN 1 AND 400", "width": "BETWEEN 1 AND 80", "draught": "> 0"}
+
+
+def per_ship_average(sql: str) -> str:
+    """An average length, width or draught counts each vessel once (the schema's rule): the
+    average width of the tankers moving through the Great Belt was taken over their reports
+    (29.5 m, ships that report often weigh more) instead of per ship (29.7 m over 12)."""
+    m = _AVG_SIZE_RE.match(sql)
+    if not m or re.search(r"\bGROUP\s+BY\b|\bSELECT\b", m.group(5), re.IGNORECASE):
+        return sql
+    column, _, alias, table, where = m.groups()
+    return (f"SELECT round(avg({column}), 1) AS {alias} FROM (\n"
+            f"  SELECT mmsi, max({column}) AS {column} FROM {table}\n"
+            f"  WHERE {where} AND {column} {_SIZE_RANGE[column.lower()]}\n  GROUP BY mmsi\n)")
+
+
 _MOVING_ASKED_RE = re.compile(r"\b(?:moving|underway|under way|in motion)\b", re.IGNORECASE)
 _STILL_ASKED_RE = re.compile(r"\b(?:docked|still|moored|anchor\w*|harbou?red|in port|stationary)\b",
                              re.IGNORECASE)
+
+
+_DOCKED_ASKED_RE = re.compile(r"\b(?:docked|harbou?red|in port|lying still|stationary|at the quay|"
+                              r"at berth)\b", re.IGNORECASE)
+
+
+def docked_filter(sql: str, request: str) -> str:
+    """The docked counterpart of moving_filter: "what percentage of the ships docked in Skagen
+    on 1 June 2026 were fishing vessels" took every ship with a report there (42.4 %) instead of
+    those lying still (41 of 98, 41.8 %). Docked is sog < 0.5 in the place's box."""
+    if (not _DOCKED_ASKED_RE.search(request) or _MOVING_ASKED_RE.search(request)
+            or not re.search(r"\bvessel_positions\b", sql, re.IGNORECASE)
+            or re.search(r"\b(?:sog|nav_status|still_in|moving_in)\b", sql, re.IGNORECASE)
+            or len(re.findall(r"\bWHERE\b", sql, re.IGNORECASE)) != 1
+            or re.search(r"\bOR\b", sql, re.IGNORECASE)):
+        return sql
+    return re.sub(r"\bWHERE\b", "WHERE sog < 0.5 AND", sql, count=1, flags=re.IGNORECASE)
 
 
 def moving_filter(sql: str, request: str) -> str:
@@ -966,6 +1177,38 @@ def precise_area_box(sql: str, area: places.Place | None) -> str:
     for x in area.box:
         sql = re.sub(rf"(?<![\d.]){re.escape(places.coord(x))}(?![\d])", f"{x:.6f}", sql)
     return sql
+
+
+_REPORT_COLUMNS_RE = re.compile(r"\b(?:nav_status|ts|sog|cog|heading|lat|lon|rot)\b", re.IGNORECASE)
+
+
+def days_to_positions(sql: str) -> str:
+    """A vessel_days query that uses a column only the reports have, on vessel_positions: "how
+    many ships were at anchor in the Skagerrak in the first week of February" wrote
+    list_contains(nav_status, 'At anchor') on vessel_days, and "between 08:00 and 10:00" a ts
+    filter there; vessel_days has neither, so every query failed. Place lists become the
+    place's box (still_in: sog < 0.5, moving_in: sog >= 1); a query that also needs a
+    vessel_days-only column stays."""
+    if (len(re.findall(r"\bvessel_days\b", sql, re.IGNORECASE)) != 1
+            or not _REPORT_COLUMNS_RE.search(sql)):
+        return sql
+    out = re.sub(r"\blist_contains\(\s*nav_status\s*,\s*('(?:[^']|'')*')\s*\)", r"nav_status = \1",
+                 sql, flags=re.IGNORECASE)
+
+    def box(m: re.Match) -> str:
+        place = places.find(m.group(2).replace("''", "'"))
+        if place is None:
+            return m.group(0)
+        b = place.box
+        extra = {"still_in": " AND sog < 0.5", "moving_in": " AND sog >= 1"}.get(m.group(1).lower(), "")
+        return (f"(lon BETWEEN {places.coord(b[0])} AND {places.coord(b[2])} AND lat BETWEEN "
+                f"{places.coord(b[1])} AND {places.coord(b[3])}{extra})")
+    out = re.sub(r"\blist_contains\(\s*(?:\w+\.)?(places|still_in|moving_in)\s*,\s*'((?:[^']|'')*)'\s*\)",
+                 box, out, flags=re.IGNORECASE)
+    if _DAYS_ONLY_RE.search(out):
+        return sql
+    out = re.sub(r"\bvessel_days\b", "vessel_positions", out, flags=re.IGNORECASE)
+    return re.sub(r"\bcount\(\s*\*\s*\)", "count(DISTINCT mmsi)", out, flags=re.IGNORECASE)
 
 
 def area_in_positions(sql: str, area: places.Place | None, request: str) -> str:
