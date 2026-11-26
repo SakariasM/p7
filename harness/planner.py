@@ -540,6 +540,12 @@ _PLAIN_WORDS = [
     # The flag (flags.py) is the column flag_country; asked for "flag countries" the student
     # wrote a column country that does not exist, and named the column it used it.
     (r"\bflag states\b", "flag countries"), (r"\bflag state\b", "flag country"),
+    # "average speed of TYCHO BRAHE while sailing" became ship_type = 'Sailing'
+    (r"\b(while|when|was|were|is|are)\s+sailing\b(?!\s+(?:ships?|boats?|vessels?|yachts?))",
+     r"\1 moving"),
+    # "out on the water at 12 August 2026": "at 12" was read as 12:00
+    (r"\bat\s+(\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:January|February|March|April|May|June|July|August|"
+     r"September|October|November|December)\b)", r"on \1"),
     # Danish ship words ("How many færger were sailing in Storebælt" counted fishing vessels)
     (r"\bkrydstogtskib(?:e|ene)?\b", "cruise ships"), (r"\bfærger(?:ne)?\b", "passenger ships"),
     (r"\bfærgen\b|\bfærge\b", "passenger ship"), (r"\bfiskeskib(?:e|ene)?\b|\bfiskefartøj(?:er)?\b",
@@ -596,14 +602,17 @@ def repair_sql(sql: str, request: str, asked: str, question: str, named: list[pl
     nautical miles did STENA DANICA sail" was answered with the old distance query, km
     called nautical miles). Each repair leaves SQL it does not recognise unchanged."""
     sql = days_to_positions(fix_place_lists(fix_years(sql, request)))
-    for repair in (per_day_counts, moving_filter, docked_filter, every_day, ships_not_reports):
+    for repair in (per_day_counts, moving_filter, docked_filter, every_day, ships_not_reports,
+                   ranking_order, at_sea_filter):
         sql = repair(sql, request)
     sql = per_ship_average(fix_distance(sql, bool(_NAUTICAL_RE.search(f"{request} {question}"))))
     sql = flag_query(destination_filter(sql, request, named), request)
     both = f"{asked}\n{request}"  # vessel names as written, dates with the years spelled out
-    for build in (duplicates_query, nearby_query, closest_query, placeholder_mmsi, ports_query):
+    for build in (duplicates_query, nearby_query, closest_query, placeholder_mmsi, ports_query,
+                  stay_query):
         sql = build(sql, both)
-    sql = time_window(weekday_query(month_query(sql, request), request), request)
+    sql = time_window(weekday_query(month_query(top_n_query(arrivals_query(sql, request), request),
+                                                request), request), request)
     if area in named:
         sql = precise_area_box(area_in_positions(sql, area, request), area)
     return names_to_mmsi(sql)
@@ -633,11 +642,14 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
     )
     written = cap_lengths(extract_sql(response.choices[0].message.content))
     sql = repair_sql(written, request, asked, question, named, area)
+    shared = ambiguous_name(sql, f"{question} {request}")
     stray = places.unexplained_boxes(sql, named, request)
     bad = invalid_values(sql)
     unknown = unknown_list_places(sql)
     known_boxes = "; ".join(places.format_place(p).strip() for p in named)
-    if bad:
+    if shared:
+        result = {"error": shared}
+    elif bad:
         column, value = bad[0]
         likely = TYPE_SYNONYMS.get(value.lower()) if column == "ship_type" else None
         result = {"error": f"'{value}' is not a {column} value in the data. "
@@ -971,6 +983,98 @@ def time_window(sql: str, request: str) -> str:
     return _SNAPSHOT_RE.sub(period, sql)
 
 
+_TOP_N_RE = re.compile(
+    r"\b(?:the\s+)?(\d+|two|three|four|five|six|seven|eight|nine|ten)\s+(longest|largest|biggest|"
+    r"widest|deepest|fastest)\s+(?:\w+\s+){0,2}?(?:ships?|vessels?|boats?|tankers?|ferries)\b", re.IGNORECASE)
+_TOP_N_COLUMN = {"longest": "length", "largest": "length", "biggest": "length", "widest": "width",
+                 "deepest": "draught", "fastest": "max_sog"}
+
+
+def top_n_query(sql: str, request: str) -> str:
+    """The n longest (widest, deepest, fastest) ships in one place over a period, one row per
+    ship: "list the 5 longest ships that docked in Copenhagen in July 2026" was written as the
+    one longest ship (length = max(length)) and gave AIDANOVA only."""
+    m = _TOP_N_RE.search(request)
+    named = places.mentioned(request, places.load())
+    when = _date_condition(sql, request)
+    if not m or len(named) > 1 or not when:
+        return sql
+    n = int(m.group(1)) if m.group(1).isdigit() else _TOP_N_WORDS.get(m.group(1).lower(), 5)
+    column = _TOP_N_COLUMN[m.group(2).lower()]
+    where = [when.replace("date =", "date =")]
+    if named:
+        lst = ("still_in" if _STILL_ASKED_RE.search(request) else
+               "moving_in" if _MOVING_ASKED_RE.search(request) else "places")
+        where.append(f"list_contains({lst}, '{named[0].name.replace(chr(39), chr(39) * 2)}')")
+    types = set(re.findall(r"\bship_type\s*=\s*'([^']+)'", sql))
+    if len(types) == 1:
+        where.append(f"ship_type = '{types.pop()}'")
+    if column == "length":
+        where.append("length <= 400")
+    return (f"SELECT mmsi, arg_max(name, date) AS name, max({column}) AS {column}\n"
+            f"FROM vessel_days WHERE {' AND '.join(where)}\n"
+            f"GROUP BY mmsi HAVING max({column}) IS NOT NULL\n"
+            f"ORDER BY {column} DESC, name LIMIT {n}")
+
+
+_ARRIVALS_RE = re.compile(r"\b(?:arriv\w*|depart\w*|came in|left)\b", re.IGNORECASE)
+
+
+def arrivals_query(sql: str, request: str) -> str:
+    """Ships that arrived in or left one port on a day, by the days they lay docked there:
+    arrived = docked that day but not the day before, departed = docked that day but not the
+    day after. "How many ships arrived in Esbjerg on 14 May 2026, and how many departed?" got
+    every ship in the box (72) and ship_type 'Sailing' (2) instead of 7 and 5."""
+    if not _ARRIVALS_RE.search(request):
+        return sql
+    named = [p for p in places.mentioned(request, places.load()) if p.kind == "port"]
+    days = sorted(dates_with_year(request))
+    if len(named) != 1 or len(days) != 1:
+        return sql
+    d = days[0]
+    before, after = d - timedelta(days=1), d + timedelta(days=1)
+    port = named[0].name.replace("'", "''")
+    return ("SELECT count(*) FILTER (WHERE today AND NOT day_before) AS arrived,\n"
+            "       count(*) FILTER (WHERE today AND NOT day_after) AS departed,\n"
+            "       count(*) FILTER (WHERE today) AS docked_that_day\n"
+            f"FROM (SELECT mmsi, bool_or(date = DATE '{d}') AS today,\n"
+            f"             bool_or(date = DATE '{before}') AS day_before,\n"
+            f"             bool_or(date = DATE '{after}') AS day_after\n"
+            f"      FROM vessel_days WHERE date BETWEEN DATE '{before}' AND DATE '{after}'\n"
+            f"        AND list_contains(still_in, '{port}') GROUP BY mmsi)")
+
+
+_STAY_RE = re.compile(r"\bhow (?:many hours|many days|long)\b.{0,60}?\b(?:docked|in port|stay(?:ed)?|"
+                      r"moored|at berth|lay|lying)\b", re.IGNORECASE)
+
+
+def stay_query(sql: str, text: str) -> str:
+    """How long a named vessel was docked in one port over a period, as separate stays (docked
+    reports in the port's box, a new stay after a gap of more than an hour) with their total:
+    "how many hours in total was AIDANOVA docked in Copenhagen during October 2026" took the
+    first to the last docked report of the month, 678 hours, instead of 3 calls, 32.8 hours."""
+    if not _STAY_RE.search(text):
+        return sql
+    named = [p for p in places.mentioned(text, places.load())]
+    when = _date_condition(sql, text)
+    mmsis = [m for m in (_vessel_mmsi(n) for n in _CAPS_NAME_RE.findall(text) if len(n) >= 3) if m]
+    if len(named) != 1 or not when or len(set(mmsis)) != 1:
+        return sql
+    b = named[0].box
+    return ("WITH d AS (\n"
+            f"  SELECT DISTINCT ts FROM vessel_positions WHERE {when} AND mmsi = {mmsis[0]}\n"
+            f"    AND sog < 0.5 AND lon BETWEEN {b[0]} AND {b[2]} AND lat BETWEEN {b[1]} AND {b[3]}\n"
+            "), g AS (\n"
+            "  SELECT ts, CASE WHEN lag(ts) OVER (ORDER BY ts) IS NULL\n"
+            "                  OR ts - lag(ts) OVER (ORDER BY ts) > INTERVAL 1 HOUR THEN 1 ELSE 0 END AS new\n"
+            "  FROM d\n"
+            "), s AS (SELECT ts, sum(new) OVER (ORDER BY ts) AS stay FROM g)\n"
+            "SELECT min(ts) AS arrived_utc, max(ts) AS left_utc,\n"
+            "       round(epoch(max(ts) - min(ts)) / 3600, 1) AS hours,\n"
+            "       round(sum(epoch(max(ts) - min(ts)) / 3600) OVER (), 1) AS total_hours\n"
+            "FROM s GROUP BY stay ORDER BY arrived_utc")
+
+
 _MONTH_RANK_RE = re.compile(r"\b(?:which|what)\s+month\b", re.IGNORECASE)
 
 
@@ -1217,6 +1321,38 @@ def docked_filter(sql: str, request: str) -> str:
     return re.sub(r"\bWHERE\b", "WHERE sog < 0.5 AND", sql, flags=re.IGNORECASE)
 
 
+_SUPERLATIVE_RE = re.compile(r"\b(?:longest|largest|biggest|widest|deepest|fastest|highest|heaviest|"
+                             r"most|slowest|shortest|smallest|lowest|fewest|top \d+)\b", re.IGNORECASE)
+_NAME_FIRST_ORDER_RE = re.compile(r"\bORDER\s+BY\s+((?:\w+\.)?name)\s*,\s*([\w.()]+)\s+(DESC|ASC)\b",
+                                  re.IGNORECASE)
+
+
+def ranking_order(sql: str, request: str) -> str:
+    """A ranking sorted by the measured column, not by name first: "list the 5 longest ships
+    that docked in Copenhagen in July 2026" sorted ORDER BY name, length DESC LIMIT 5 and gave
+    the alphabetically first five (4 BOYS, 14 m) instead of AIDANOVA, 337 m, and four more."""
+    if not _SUPERLATIVE_RE.search(request):
+        return sql
+    return _NAME_FIRST_ORDER_RE.sub(lambda m: f"ORDER BY {m.group(2)} {m.group(3)}, {m.group(1)}",
+                                    sql, count=1)
+
+
+_AT_SEA_RE = re.compile(r"\b(?:at sea|out on the water|on the water|offshore|not in (?:a |any )?port|"
+                        r"outside (?:the )?ports?)\b", re.IGNORECASE)
+
+
+def at_sea_filter(sql: str, request: str) -> str:
+    """Ships "out on the water" or "at sea" are those outside every port box (NOT in_port, as
+    the schema says): "how many fishing ships were out on the water on 12 August 2026" counted
+    all 717 that reported, in ports too, instead of the 579 outside them."""
+    if (not _AT_SEA_RE.search(request) or re.search(r"\bin_port\b", sql, re.IGNORECASE)
+            or not re.search(r"\bvessel_positions\b", sql, re.IGNORECASE)
+            or len(re.findall(r"\bWHERE\b", sql, re.IGNORECASE)) != 1
+            or re.search(r"\bOR\b", sql, re.IGNORECASE)):
+        return sql
+    return re.sub(r"\bWHERE\b", "WHERE NOT in_port(lon, lat) AND", sql, count=1, flags=re.IGNORECASE)
+
+
 def moving_filter(sql: str, request: str) -> str:
     """A question about moving ships whose positions query has no speed condition gets
     sog >= 1 (moving, as the schema defines it). "Which hour on 14 June 2026 had the most
@@ -1406,6 +1542,29 @@ _NAME_FILTER_RE = re.compile(r"\b(WHERE|AND)(\s+)(?:\w+\.)?name\s*=\s*'((?:[^']|
                              re.IGNORECASE)
 
 
+_NAME_COUNT_Q_RE = re.compile(r"\b(?:ships?|vessels?|boats?)\s+(?:are\s+|were\s+)?(?:named|called)\b|"
+                              r"\bnamed\b.*\bhow many\b", re.IGNORECASE)
+
+
+def ambiguous_name(sql: str, request: str) -> str | None:
+    """An error when a question about one vessel names a vessel name several ships share: "how
+    many nautical miles did ANNA sail on 1-2 July 2026" summed the tracks of the 14 ANNAs that
+    reported (61 ships are named ANNA). Questions about the ships with a name stay."""
+    if _NAME_COUNT_Q_RE.search(request):
+        return None
+    for name in dict.fromkeys(n.replace("''", "'") for n in _NAME_EQ_RE.findall(sql)):
+        quoted = name.replace("'", "''")
+        found = query_ais_data(
+            f"SELECT mmsi, any_value(ship_type) AS t, max(length) AS l FROM vessel_days "
+            f"WHERE name = '{quoted}' GROUP BY mmsi ORDER BY count(*) DESC LIMIT 6").get("rows") or []
+        if len(found) > 1:
+            examples = "; ".join(f"MMSI {m} ({t or 'type unknown'}{f', {l} m' if l else ''})"
+                                 for m, t, l in found[:5])
+            return (f"Several vessels are named {name} ({examples}{', ...' if len(found) > 5 else ''}). "
+                    "Ask the user which one is meant (by MMSI) instead of answering for all of them.")
+    return None
+
+
 def names_to_mmsi(sql: str) -> str:
     """A filter on a vessel name that exactly one MMSI has, as a filter on that MMSI: some of a
     ship's reports carry no name (139 of KBV 490's 2,321 on 1 Sep 2026; AIDANOVA's first
@@ -1420,6 +1579,18 @@ def names_to_mmsi(sql: str) -> str:
             return m.group(0)
         return f"{m.group(1)}{m.group(2)}mmsi = {int(rows[0][0])}"
     return _NAME_FILTER_RE.sub(by_mmsi, sql)
+
+
+def _close_vessel_names(name: str) -> list[str]:
+    """Up to two vessel names that differ from this one by a letter or two (difflib ratio
+    >= 0.88), among names with the same first letter."""
+    key = " ".join(name.upper().split())
+    if len(key) < 4:
+        return []
+    found = query_ais_data(f"SELECT DISTINCT name FROM vessel_days WHERE name LIKE "
+                           f"'{key[0].replace(chr(39), chr(39) * 2)}%' AND abs(length(name) - "
+                           f"{len(key)}) <= 2").get("rows") or []
+    return difflib.get_close_matches(key, [r[0] for r in found if r[0]], n=2, cutoff=0.88)
 
 
 def unknown_names(sql: str, result: dict, asked: str = "") -> dict:
@@ -1454,18 +1625,29 @@ def unknown_names(sql: str, result: dict, asked: str = "") -> dict:
                     f"ORDER BY name LIMIT 8").get("rows") or []
         names = [r[0] for r in similar]
         key = word.upper()
+        # "TYCO BRAHE": a name one or two letters from a real one is offered by that name
+        close = _close_vessel_names(name)
+        if close and not names:
+            return {"error": f"No vessel in the data is named '{name}'. Did you mean "
+                             f"{' or '.join(close)}? If so, ask again with that name (and say "
+                             "in the answer which name was used)."}
+        company = bool(re.search(rf"{re.escape(word)}[\w ]{{0,20}}\s+(?:ships|vessels|ferries|"
+                                 rf"fleet|boats|tankers)\b", asked, re.IGNORECASE))
         where = ("start with" if all(n.upper().startswith(key) for n in names) else
                  "end with" if all(n.upper().endswith(key) for n in names) else "contain")
         return {"error": f"No vessel in the data is named '{name}'. Names are as the crews "
-                         "typed them, and AIS has no owner, operator or company field, so a "
-                         "shipping company's fleet cannot be selected for certain. "
+                         "typed them" + (", and AIS has no owner, operator or company field, so "
+                                         "a shipping company's fleet cannot be selected for "
+                                         "certain" if company else "") + ". "
                          + (f"Vessels whose names contain '{word}': "
-                            f"{', '.join(names)}. If the question means a company's ships, "
-                            f"ask again for the ships whose names {where} {key} (e.g. 'How many "
-                            f"passenger ships whose names {where} {key} docked in <place> on "
-                            f"<date>?') and say in the "
-                            "answer that this goes by name, as AIS has no operator field."
-                            if similar else "Tell the user this instead of giving a number.")}
+                            f"{', '.join(names)}. "
+                            + (f"If the question means a company's ships, ask again for the "
+                               f"ships whose names {where} {key} (e.g. 'How many passenger "
+                               f"ships whose names {where} {key} docked in <place> on <date>?') "
+                               "and say in the answer that this goes by name, as AIS has no "
+                               "operator field." if company else
+                               "Say so, and offer these names.")
+                            if names else "Tell the user this instead of giving a number.")}
     return result
 
 
@@ -1993,6 +2175,9 @@ _VAGUE_SHIP_RE = re.compile(
     re.IGNORECASE)  # not "where was the ferry TYCHO BRAHE ..."
 _SET_Q_RE = re.compile(r"\bbut not\b|\band not (?:in|on|at)\b|\bin both\b|\bboth\s+\S+(?:\s+\S+)?\s+and\b",
                        re.IGNORECASE)
+# "How long did that ship stay in port?": no ship named, and each question stands alone
+_THAT_SHIP_RE = re.compile(r"\b(?:that|this|the same|the previous|the last)\s+(ship|vessel|boat|ferry|"
+                           r"tanker|tug|yacht)\b(?!s)", re.IGNORECASE)
 _FLAG_Q_RE = re.compile(r"\bflag(?:s| countr\w*| states?)\b|\bflagged\b|\bregistered in\b",
                         re.IGNORECASE)
 _NOT_IN_AIS_RE = re.compile(
@@ -2115,7 +2300,7 @@ def _run_routed(question: str, max_turns: int, enable_thinking: bool, return_tra
                  "route": "reply", "route_reason": "impossible value",
                  "question_as_read": question}
         return trace if return_trace else impossible
-    vague = _VAGUE_SHIP_RE.match(question)
+    vague = _VAGUE_SHIP_RE.match(question) or _THAT_SHIP_RE.search(question)
     if vague:
         # "Where was the big ferry at noon on 5 May 2026?" got the largest passenger ship at sea
         answer = (f"Which {vague.group(1).lower()} do you mean? Please give its name (as it is "
@@ -2302,6 +2487,8 @@ def _run_learned(planner: OpenAI, question: str, map_view: bool) -> tuple[dict |
             request = plain_words(spell_out(respell_places(question)))
             named = places.mentioned(request, places.load())
             sql = repair_sql(hit["sql"], request, asked, question, named)
+            if ambiguous_name(sql, question):  # several ships with the name: ask, via the router
+                return None, None
             result = with_total(sql, with_names(query_ais_data(sql)))
             step = {"request": question, "places": hit["places"], "sql": sql, "result": result}
             if sql != hit["sql"]:
