@@ -156,11 +156,14 @@ def map_hints(
     sqls = [c.get("sql") or "" for c in calls if "error" not in (c.get("result") or {})]
 
     vessels, seen = [], set()
-    for c in calls:
+    # Only the last step that lists vessels, the one the answer gives: "which ships were docked
+    # in both Frederikshavn and Skagen" highlighted both ports' full lists (the planner's first
+    # two steps) around the 2 ships that were the answer.
+    listing = [c for c in calls if "error" not in (c.get("result") or {})
+               and "mmsi" in [str(x).lower() for x in (c.get("result") or {}).get("columns") or []]]
+    for c in listing[-1:]:
         result = c.get("result") or {}
         columns = [str(x).lower() for x in result.get("columns") or []]
-        if "mmsi" not in columns:
-            continue
         i, j = columns.index("mmsi"), columns.index("name") if "name" in columns else None
         for row in result.get("rows") or []:
             mmsi = row[i]

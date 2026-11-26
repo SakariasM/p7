@@ -244,7 +244,9 @@ def find_place(name: str, session: list[places.Place]) -> dict:
                 "or period of the request and name no place unless the question has one"}
     place = places.find(name, places.load() + session)
     if place is None:
-        return {"unknown": name, "next": "you may call propose_place once for it"}
+        return {"unknown": name, "next": "you may call propose_place once for it; the data covers "
+                "Danish waters and their surroundings (about 53-59.5 N, 0.5-20 E), so a place "
+                "outside that (e.g. Rotterdam) has no data: say so instead"}
     return place.as_dict()
 
 
@@ -332,6 +334,8 @@ def tidy_answer(text: str) -> str:
     return text
 
 
+_ASKS_USER_RE = re.compile(r"\bplease (?:provide|specify|give|tell|clarify|confirm)\b|\bcould you\b|"
+                           r"\bwhich \w+(?: \w+)? do you mean\b|\bdo you mean\b", re.IGNORECASE)
 _PLAN_ONLY_RE = re.compile(r"\s*(?:\*\*)?plan\b", re.IGNORECASE)
 
 
@@ -536,6 +540,14 @@ _PLAIN_WORDS = [
     # The flag (flags.py) is the column flag_country; asked for "flag countries" the student
     # wrote a column country that does not exist, and named the column it used it.
     (r"\bflag states\b", "flag countries"), (r"\bflag state\b", "flag country"),
+    # Danish ship words ("How many færger were sailing in Storebælt" counted fishing vessels)
+    (r"\bkrydstogtskib(?:e|ene)?\b", "cruise ships"), (r"\bfærger(?:ne)?\b", "passenger ships"),
+    (r"\bfærgen\b|\bfærge\b", "passenger ship"), (r"\bfiskeskib(?:e|ene)?\b|\bfiskefartøj(?:er)?\b",
+     "fishing vessels"), (r"\btankskib(?:e|ene)?\b", "tankers"),
+    (r"\bcontainerskib(?:e|ene)?\b|\bfragtskib(?:e|ene)?\b", "cargo ships"),
+    (r"\bslæbebåd(?:e|ene)?\b", "tugs"), (r"\blystbåd(?:e|ene)?\b|\blystfartøj(?:er)?\b",
+     "pleasure craft"), (r"\bsejlbåd(?:e|ene)?\b", "sailing ships"),
+    (r"\bskibe(?:ne)?\b", "ships"), (r"\bskibet\b|\bskib\b", "ship"),
     (r"\bflag (countr(?:y|ies))\b(?! \(flag_country\))", r"flag \1 (flag_country)"),
 ]
 
@@ -606,9 +618,9 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
     sql = per_ship_average(fix_distance(sql, bool(_NAUTICAL_RE.search(f"{request} {question}"))))
     sql = flag_query(destination_filter(sql, request, named), request)
     both = f"{asked}\n{request}"  # vessel names as written, dates with the years spelled out
-    for build in (duplicates_query, nearby_query, closest_query, placeholder_mmsi):
+    for build in (duplicates_query, nearby_query, closest_query, placeholder_mmsi, ports_query):
         sql = build(sql, both)
-    sql = time_window(month_query(sql, request), request)
+    sql = time_window(weekday_query(month_query(sql, request), request), request)
     if area in named:
         sql = precise_area_box(area_in_positions(sql, area, request), area)
     sql = names_to_mmsi(sql)
@@ -980,6 +992,58 @@ def month_query(sql: str, request: str) -> str:
             f"\nGROUP BY month ORDER BY vessels {'ASC' if fewest else 'DESC'}, month LIMIT 3")
 
 
+_WEEKDAY_RE = re.compile(r"\bday of (?:the )?week\b|\bweekdays?\b|\bweekends?\b|\bweek ?days?\b",
+                         re.IGNORECASE)
+
+
+def weekday_query(sql: str, request: str) -> str:
+    """Daily counts in one place averaged per day of the week (or weekend against weekday days):
+    the student has no such query ("which day of the week had the most ships docked in Esbjerg
+    on average in August 2026" failed; weekend against weekday in Aarhus counted the whole month
+    twice, 442 and 442)."""
+    if not _WEEKDAY_RE.search(request) or re.search(r"dayofweek|dayname|isodow", sql, re.IGNORECASE):
+        return sql
+    when = _date_condition(sql, request)
+    named = places.mentioned(request, places.load())
+    if not when or "BETWEEN" not in when.upper() or len(named) > 1:
+        return sql
+    where = [when]
+    if named:
+        column = ("still_in" if _STILL_ASKED_RE.search(request) else
+                  "moving_in" if _MOVING_ASKED_RE.search(request) else "places")
+        where.append(f"list_contains({column}, '{named[0].name.replace(chr(39), chr(39) * 2)}')")
+    types = set(re.findall(r"\bship_type\s*=\s*'([^']+)'", sql))
+    if len(types) == 1:
+        where.append(f"ship_type = '{types.pop()}'")
+    split = ("CASE WHEN dayofweek(date) IN (0, 6) THEN 'weekend day' ELSE 'weekday' END"
+             if re.search(r"\bweekends?\b", request, re.IGNORECASE) else "dayname(date)")
+    return (f"SELECT {split} AS day_type, round(avg(n), 1) AS ships_per_day, count(*) AS days\n"
+            f"FROM (SELECT date, count(DISTINCT mmsi) AS n FROM vessel_days\n"
+            f"      WHERE {' AND '.join(where)} GROUP BY date)\n"
+            "GROUP BY day_type ORDER BY ships_per_day DESC")
+
+
+_PORTS_VISITED_RE = re.compile(r"\b(?:which|what)\s+ports?\s+(?:did|has|had)\s+(?:the\s+)?(.+?)\s+"
+                               r"(?:visit|call at|dock (?:in|at)|stop (?:in|at)|go to)\b", re.IGNORECASE)
+
+
+def ports_query(sql: str, text: str) -> str:
+    """The ports a named vessel docked in over a period, from its per-day still_in lists (only
+    places that are ports): "which ports did STENA DANICA visit between 1 and 7 May 2026" had
+    no query that worked (Frederikshavn and Gothenburg, every day)."""
+    m = _PORTS_VISITED_RE.search(text)
+    if not m:
+        return sql
+    mmsi = _vessel_mmsi(m.group(1).strip())
+    when = _date_condition(sql, text)
+    if mmsi is None or not when:
+        return sql
+    ports = ", ".join("'" + p.name.replace("'", "''") + "'" for p in places.load() if p.kind == "port")
+    return ("SELECT port, count(DISTINCT date) AS days, min(date) AS first_day, max(date) AS last_day\n"
+            f"FROM (SELECT date, unnest(still_in) AS port FROM vessel_days WHERE mmsi = {mmsi} AND {when})\n"
+            f"WHERE port IN ({ports})\nGROUP BY port ORDER BY days DESC, port")
+
+
 def per_day_counts(sql: str, request: str) -> str:
     """A count over a date range asked for each day, as one count per date. "How many ships
     docked at Helsingør on each day from 1 to 7 June 2026?" got one number, 294: the daily
@@ -1118,7 +1182,8 @@ def per_ship_average(sql: str) -> str:
             f"  WHERE {where} AND {column} {_SIZE_RANGE[column.lower()]}\n  GROUP BY mmsi\n)")
 
 
-_MOVING_ASKED_RE = re.compile(r"\b(?:moving|underway|under way|in motion)\b", re.IGNORECASE)
+_MOVING_ASKED_RE = re.compile(r"\b(?:moving|underway|under way|in motion)\b|\bsailing\b(?!\s+"
+                              r"(?:ships?|boats?|vessels?|yachts?|craft))", re.IGNORECASE)
 _STILL_ASKED_RE = re.compile(r"\b(?:docked|still|moored|anchor\w*|harbou?red|in port|stationary)\b",
                              re.IGNORECASE)
 
@@ -1134,10 +1199,13 @@ def docked_filter(sql: str, request: str) -> str:
     if (not _DOCKED_ASKED_RE.search(request) or _MOVING_ASKED_RE.search(request)
             or not re.search(r"\bvessel_positions\b", sql, re.IGNORECASE)
             or re.search(r"\b(?:sog|nav_status|still_in|moving_in)\b", sql, re.IGNORECASE)
-            or len(re.findall(r"\bWHERE\b", sql, re.IGNORECASE)) != 1
             or re.search(r"\bOR\b", sql, re.IGNORECASE)):
         return sql
-    return re.sub(r"\bWHERE\b", "WHERE sog < 0.5 AND", sql, count=1, flags=re.IGNORECASE)
+    wheres = len(re.findall(r"\bWHERE\b", sql, re.IGNORECASE))
+    if wheres != 1 and not (wheres == 2 and re.search(r"\b(?:EXCEPT|INTERSECT)\b", sql, re.IGNORECASE)):
+        return sql
+    # both halves of "docked on 10 July but not on 11 July" (EXCEPT): 21 present, 18 docked
+    return re.sub(r"\bWHERE\b", "WHERE sog < 0.5 AND", sql, flags=re.IGNORECASE)
 
 
 def moving_filter(sql: str, request: str) -> str:
@@ -1526,7 +1594,10 @@ def run(question: str, max_turns: int = 10, enable_thinking: bool = False,
 
         if not message.tool_calls:
             answer = with_cruise_note(question, strip_thinking(message.content), steps)
-            if nudges >= 2 and announced_step(answer, True):
+            asks_user = bool(_ASKS_USER_RE.search(answer))
+            if asks_user:
+                pass  # a question back to the user ("please provide the coordinates") stays
+            elif nudges >= 2 and announced_step(answer, True):
                 # still "Let me try a different approach ... I will query ..." after the nudges
                 answer = gave_up(steps)
             elif not answered and (_PLAN_ONLY_RE.match(answer) or (steps and not re.search(
@@ -1777,6 +1848,9 @@ def _relative_period(m: re.Match, today: date) -> tuple[date, date]:
     return today, today  # now, currently, today, ...
 
 
+_PART_OF_DAY = {"this morning": ("06:00", "12:00"), "tonight": ("18:00", "23:59")}
+
+
 def resolve_relative(question: str) -> tuple[str, str | None]:
     """"How many ships are currently in Skagen?" -> "How many ships are in Skagen on 30
     September 2026?" with CURRENT_DAY the latest day, and a note saying so for the answer."""
@@ -1785,6 +1859,10 @@ def resolve_relative(question: str) -> tuple[str, str | None]:
         return question, None
     d0, d1 = _relative_period(m, CURRENT_DAY)
     when = f"on {day_text(d0)}" if d0 == d1 else f"from {day_text(d0)} to {day_text(d1)}"
+    part = _PART_OF_DAY.get(m.group(1).lower())
+    if part and d0 == d1:
+        # "How many ferries were sailing in Storebælt this morning" counted the whole day
+        when = f"between {part[0]} and {part[1]} UTC on {day_text(d0)}"
     rest = (question[:m.start()] + question[m.end():]).strip()
     rest = re.sub(r"\s+([?.!,])", r"\1", re.sub(r"\s{2,}", " ", rest))
     end = re.search(r"[?.!]*$", rest)
@@ -1792,7 +1870,8 @@ def resolve_relative(question: str) -> tuple[str, str | None]:
     whole = (" (whole days)" if (m.group(3) and m.group(3).lower() == "hours"
                                   and _relative_count(m) % 24)
              or m.group(1).lower().endswith("hour") else "")
-    note = (f'Note: "{m.group(1)}" is read as {when.split(" ", 1)[1]}{whole}, the latest data '
+    shown = when if when.startswith("between") else when.split(" ", 1)[1]
+    note = (f'Note: "{m.group(1)}" is read as {shown}{whole}, the latest data '
             f"available (the data covers {PERIOD_TEXT}; there are no live positions).")
     return rewritten, note
 
@@ -1874,11 +1953,37 @@ _DATE_WORDS_RE = re.compile(
 _COUNT_WORDS_RE = re.compile(
     r"\b(how many|number of|count|total|average|mean|largest|longest|biggest|smallest|"
     r"fastest|slowest|busiest)\b", re.IGNORECASE)
+_CLOCK_IN_TEXT_RE = re.compile(r"(?<![\d:])(\d{1,2}):(\d{2})(?::(\d{2}))?(?![\d:])")
+_NEGATIVE_DISTANCE_RE = re.compile(
+    r"(?<![\w.])-\s*\d+(?:\.\d+)?\s*(?:nautical miles?|nm|km|kilomet(?:er|re)s?|met(?:er|re)s?|m|miles?)\b",
+    re.IGNORECASE)
+
+
+def impossible_value(question: str) -> str | None:
+    """A reply for a time or distance that cannot be: "which ships were docked in Skagen at
+    25:00" ended in the failure message (and a raw "hour must be in 0..23" once), and "within
+    -3 nautical miles of TYCHO BRAHE" was answered as if it were 3."""
+    for m in _CLOCK_IN_TEXT_RE.finditer(question):
+        hour, minute, second = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+        if hour > 23 or minute > 59 or second > 59:
+            hint = (f" Did you mean {hour - 24:02d}:{minute:02d} the next day?"
+                    if 24 <= hour < 48 and minute < 60 else "")
+            return (f"{m.group(0)} is not a valid time (times run from 00:00 to 23:59 UTC)."
+                    f"{hint} Please ask again with the time you meant.")
+    m = _NEGATIVE_DISTANCE_RE.search(question)
+    if m:
+        return (f"A distance cannot be negative ({m.group(0).strip()}). Please ask again with the "
+                "distance you meant, for example within 3 nautical miles.")
+    return None
+
+
 _VAGUE_SHIP_RE = re.compile(
     r"\s*(?:where|what position)\s+(?:was|is|were|did)\s+the\s+(?:(?:big|large|small|little|old|new|"
     r"fast|red|white|black|blue|green|yellow|grey|gray)\s+)?(ferry|ship|boat|vessel|tanker|yacht|"
     r"tug|trawler)\b(?=\s*(?:at|on|in|during|around|yesterday|today|last|this|\?|$))",
     re.IGNORECASE)  # not "where was the ferry TYCHO BRAHE ..."
+_SET_Q_RE = re.compile(r"\bbut not\b|\band not (?:in|on|at)\b|\bin both\b|\bboth\s+\S+(?:\s+\S+)?\s+and\b",
+                       re.IGNORECASE)
 _FLAG_Q_RE = re.compile(r"\bflag(?:s| countr\w*| states?)\b|\bflagged\b|\bregistered in\b",
                         re.IGNORECASE)
 _NOT_IN_AIS_RE = re.compile(
@@ -1995,6 +2100,12 @@ def _run_routed(question: str, max_turns: int, enable_thinking: bool, return_tra
                 map_view: bool):
     asked = question
     question = numeric_dates(question)  # the router, planner and answer see the day it means
+    impossible = impossible_value(question)
+    if impossible:
+        trace = {"answer": impossible, "plan": None, "tool_calls": [], "place_calls": [],
+                 "route": "reply", "route_reason": "impossible value",
+                 "question_as_read": question}
+        return trace if return_trace else impossible
     vague = _VAGUE_SHIP_RE.match(question)
     if vague:
         # "Where was the big ferry at noon on 5 May 2026?" got the largest passenger ship at sea
@@ -2037,6 +2148,11 @@ def _run_routed(question: str, max_turns: int, enable_thinking: bool, return_tra
             # data question the student summed the ship's length over its reports instead
         elif choice == "reply" and clearly_data(question):
             choice, reason = "plan", f"not reply: a question about ship data ({reason})"
+        if choice == "plan" and _SET_Q_RE.search(question) and len(
+                places.mentioned(question, places.load())) <= 2:
+            # "docked in Rønne on 10 July but not on 11 July": the planner subtracted the two
+            # counts (12) instead of the ships (18); the student writes EXCEPT / INTERSECT
+            choice, reason = "direct", f"ships in one set but not (or also) another ({reason})"
         if choice in ("plan", "reply") and _FLAG_Q_RE.search(question) and len(
                 places.mentioned(question, places.load())) <= 1:
             # "Which three flag states had the most ships docked in Esbjerg": the planner's own
@@ -2082,11 +2198,22 @@ def example_ships(result: dict) -> list[str]:
     return []
 
 
+_BREAKDOWN_RE = re.compile(r"\bbreak\s*(?:it\s+)?down\b|\bbreakdown\b|\bby (?:ship )?type\b|"
+                           r"\bper (?:ship )?type\b|\beach (?:ship )?type\b|\bsplit\b", re.IGNORECASE)
+
+
 def phrase(planner: OpenAI, question: str, step: dict, map_view: bool = False) -> str:
     """The 8B's plain-text answer from one query's result (the direct route's wording)."""
     result = step["result"]
     listed = ship_list(result)
     list_lines = ""
+    rows = result.get("rows") or []
+    if (not listed and len(rows) > 1 and _BREAKDOWN_RE.search(question)
+            and all(len(r) == 2 and isinstance(r[1], (int, float)) for r in rows)):
+        # "Break down the ships docked in Hirtshals by ship type": every count was right, but
+        # the 8B gave a total of 63 for counts adding up to 87
+        list_lines = (f"\nSum of the counts: {sum(r[1] for r in rows):g} (give it as the total "
+                      "and list every count)")
     if listed:
         list_lines = f"\nNumber of rows: {result.get('total_rows', len(result['rows']))}"
         examples = example_ships(result)
