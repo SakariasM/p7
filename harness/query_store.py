@@ -384,11 +384,14 @@ def pattern_id(skeleton: str) -> str:
 # vessel_days lists, ship types, and every date a week earlier (or later near the start).
 _OTHER = {"port": ["Aalborg", "Skagen", "Frederikshavn"], "area": ["Kattegat", "Øresund",
                                                                    "Fehmarn Belt"],
-          "type": ["Cargo", "Tanker", "Passenger"]}
+          "type": ["Cargo", "Tanker", "Passenger", "Fishing", "Tug", "Pleasure", "Sailing", "HSC"]}
 _OTHER_VESSELS = ["TYCHO BRAHE", "HAMLET", "AURORA AF HELSINGBORG", "PERNILLE", "JEPPE"]
 
 
-def other_values(values: dict[str, object]) -> dict[str, object]:
+def other_values(values: dict[str, object]) -> dict[str, object] | None:
+    """The values with each slot changed, or None when a slot has no other value left: two
+    ship types (tankers or cargo ships) used up the three other types, and the StopIteration
+    stopped the whole nightly distill (26 Nov 2026)."""
     out, used = dict(values), set(values.values())
     shift = timedelta(days=-7)
     if any(isinstance(v, date) and v + shift < FIRST_DAY for v in values.values()):
@@ -397,15 +400,19 @@ def other_values(values: dict[str, object]) -> dict[str, object]:
         if name.startswith("date"):
             out[name] = min(value + shift, LAST_DAY)
         elif name.startswith("vessel"):
-            out[name] = next(v for v in _OTHER_VESSELS if v not in used
-                             and places.normalise(v) in _vessel_names())
+            out[name] = next((v for v in _OTHER_VESSELS if v not in used
+                              and places.normalise(v) in _vessel_names()), None)
+            if out[name] is None:
+                return None
             used.add(out[name])
         elif name.startswith(("place", "type")):
             place = _place(str(value)) if name.startswith("place") else None
             kind = "type" if name.startswith("type") else (place.kind if place else "port")
             more = [] if kind == "type" else sorted(p.name for p in places.load(False)
                                                     if p.kind == kind)
-            out[name] = next(v for v in [*_OTHER.get(kind, []), *more] if v not in used)
+            out[name] = next((v for v in [*_OTHER.get(kind, []), *more] if v not in used), None)
+            if out[name] is None:
+                return None
             used.add(out[name])
     return out
 
@@ -686,13 +693,16 @@ def distill(log_dir: Path = LOG_DIR, feedback_file: Path = FEEDBACK_FILE,
         elif check:
             values = {k: (date.fromisoformat(v) if k.startswith("date") else v)
                       for k, v in p["examples"][0]["values"].items()}
-            if p.get("kind") == "port_calls":  # other dates; the area keeps its ports
-                other = {**other_values(values),
-                         **{k: v for k, v in values.items() if k.startswith("place")}}
+            changed = other_values(values)
+            if changed is None:
+                pass  # no other value for a slot: the pattern is not tried with others
+            elif p.get("kind") == "port_calls":  # other dates; the area keeps its ports
+                other = {**changed, **{k: v for k, v in values.items() if k.startswith("place")}}
                 result = planner.run_port_calls(render_args(p["sql"], other))[1]
+                p["runs_with_other_values"] = "error" not in result
             else:
-                result = query_ais_data(render_sql(p["sql"], other_values(values)))
-            p["runs_with_other_values"] = "error" not in result
+                result = query_ais_data(render_sql(p["sql"], changed))
+                p["runs_with_other_values"] = "error" not in result
         p["status"], p["status_by"] = _status(p, reviews.get(p["id"]))
     store = {"built": time.strftime("%Y-%m-%dT%H:%M:%S"), "runs": len(runs),
              "refused": refused, "patterns": sorted(patterns.values(), key=lambda p: p["id"]),
