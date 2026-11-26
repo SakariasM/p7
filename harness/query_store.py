@@ -865,6 +865,20 @@ def _vessel_match(store: dict, alias: str,
     return None
 
 
+def _same_place_kinds(pattern: dict, values: dict[str, object]) -> bool:
+    """Each place slot gets a place of the kind the pattern was learned with: "which ships were
+    docked in {place} at {time} on {date}" learned for a port answered "docked in Kattegat" (a
+    sea area) with every ship lying still in any harbour inside it (211)."""
+    learned = (pattern.get("examples") or [{}])[0].get("values") or {}
+    for name, value in values.items():
+        if not name.startswith("place") or name not in learned:
+            continue
+        old, new = _place(str(learned[name])), _place(str(value))
+        if old and new and old.kind != new.kind:
+            return False
+    return True
+
+
 def match(question: str, similar: bool = True) -> dict | None:
     """The best approved pattern for this question: one with its exact wording and slots, one
     whose wording it fits with a vessel name in a {vessel} slot, or (similar=True) the most
@@ -894,6 +908,7 @@ def match(question: str, similar: bool = True) -> dict | None:
             if sims[best] >= SIMILAR_MIN:
                 matched, p = pairs[allowed[best]]
                 hits, similarity, via = [p], round(float(sims[best]), 3), "similar"
+    hits = [p for p in hits if _same_place_kinds(p, values)]
     if not hits:
         return None
     p = max(hits, key=lambda p: (p["score"], len(p["runs"])))

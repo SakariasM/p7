@@ -589,6 +589,26 @@ def plain_words(request: str) -> str:
     return request
 
 
+def repair_sql(sql: str, request: str, asked: str, question: str, named: list[places.Place],
+               area: places.Place | None = None) -> str:
+    """Every repair of a query, in order: for the student's SQL in ask_data, and for a learned
+    pattern's SQL in _run_learned (a pattern learned before a fix kept the old bug: "how many
+    nautical miles did STENA DANICA sail" was answered with the old distance query, km
+    called nautical miles). Each repair leaves SQL it does not recognise unchanged."""
+    sql = days_to_positions(fix_place_lists(fix_years(sql, request)))
+    for repair in (per_day_counts, moving_filter, docked_filter, every_day, ships_not_reports):
+        sql = repair(sql, request)
+    sql = per_ship_average(fix_distance(sql, bool(_NAUTICAL_RE.search(f"{request} {question}"))))
+    sql = flag_query(destination_filter(sql, request, named), request)
+    both = f"{asked}\n{request}"  # vessel names as written, dates with the years spelled out
+    for build in (duplicates_query, nearby_query, closest_query, placeholder_mmsi, ports_query):
+        sql = build(sql, both)
+    sql = time_window(weekday_query(month_query(sql, request), request), request)
+    if area in named:
+        sql = precise_area_box(area_in_positions(sql, area, request), area)
+    return names_to_mmsi(sql)
+
+
 def ask_data(student: OpenAI, request: str, session: list[places.Place] | None = None,
              model: str = STUDENT_MODEL, question: str = "") -> dict:
     """The SQL writer (the student, or with model=MODEL_PATH the 8B, for comparison) writes SQL
@@ -612,18 +632,7 @@ def ask_data(student: OpenAI, request: str, session: list[places.Place] | None =
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
     written = cap_lengths(extract_sql(response.choices[0].message.content))
-    sql = days_to_positions(fix_place_lists(fix_years(written, request)))
-    for repair in (per_day_counts, moving_filter, docked_filter, every_day, ships_not_reports):
-        sql = repair(sql, request)  # each leaves SQL it does not recognise unchanged
-    sql = per_ship_average(fix_distance(sql, bool(_NAUTICAL_RE.search(f"{request} {question}"))))
-    sql = flag_query(destination_filter(sql, request, named), request)
-    both = f"{asked}\n{request}"  # vessel names as written, dates with the years spelled out
-    for build in (duplicates_query, nearby_query, closest_query, placeholder_mmsi, ports_query):
-        sql = build(sql, both)
-    sql = time_window(weekday_query(month_query(sql, request), request), request)
-    if area in named:
-        sql = precise_area_box(area_in_positions(sql, area, request), area)
-    sql = names_to_mmsi(sql)
+    sql = repair_sql(written, request, asked, question, named, area)
     stray = places.unexplained_boxes(sql, named, request)
     bad = invalid_values(sql)
     unknown = unknown_list_places(sql)
@@ -2289,12 +2298,19 @@ def _run_learned(planner: OpenAI, question: str, map_view: bool) -> tuple[dict |
             wording = {**step, "sql": step["request"], "result": {
                 "columns": ["port_calls reply"], "rows": [[json.dumps(reply, default=str)]]}}
         else:
-            result = with_total(hit["sql"], with_names(query_ais_data(hit["sql"])))
-            step = {"request": question, "places": hit["places"], "sql": hit["sql"],
-                    "result": result}
+            asked = question
+            request = plain_words(spell_out(respell_places(question)))
+            named = places.mentioned(request, places.load())
+            sql = repair_sql(hit["sql"], request, asked, question, named)
+            result = with_total(sql, with_names(query_ais_data(sql)))
+            step = {"request": question, "places": hit["places"], "sql": sql, "result": result}
+            if sql != hit["sql"]:
+                step["sql_as_learned"] = hit["sql"]
             wording = step
         if "error" not in result and result.get("rows"):
-            answer = query_store.render_answer(hit, result)
+            # a repaired query no longer fits the pattern's answer template: the 8B words it
+            answer = (query_store.render_answer(hit, result)
+                      if step.get("sql_as_learned") is None else None)
             similar = (f", similar to \"{hit['matched']}\" ({hit['similarity']})"
                        if hit["similar"] else "")
             trace = {"answer": answer or phrase(planner, question, wording, map_view),
