@@ -10,8 +10,10 @@ Per vessel and day:
                                       longer values are AIS errors), draught the largest
   reports, first_ts, last_ts          distinct report times, first and last report
   distance_km                         sum of the steps between consecutive reports at most
-                                      an hour apart
-  max_sog, avg_sog                    highest and average speed over the reports (knots)
+                                      an hour apart and at most MAX_STEP_KNOTS (a faster step
+                                      is a position jump: KBV 490 on 1 Sep 2026 had 59 steps
+                                      over 60 knots and 726 km instead of about 105)
+  max_sog, avg_sog                    top speed held over two reports, average speed (knots)
   places                              named places (places.json) with at least one report
   still_in                            ... where it lay still (sog < 0.5): docked / harbored
   moving_in                           ... where it moved (sog >= 1): e.g. under a bridge
@@ -27,12 +29,15 @@ whose file exists are skipped, so a failed run is started again; files are writt
 
     python3 build_vessel_days.py [--task I --tasks N]   # day i where i % N == I (SLURM array)
     python3 build_vessel_days.py --static               # after all days: the per-ship table
+    python3 build_vessel_days.py --out DIR              # build into DIR (a rebuild beside the
+                                                        # live table, swapped in afterwards)
 """
 
 import argparse
 import hashlib
 import json
 import time
+from pathlib import Path
 
 import duckdb
 
@@ -42,6 +47,7 @@ from ais_tool import _DATES, CLEAN_DIR, PROJECT_DIR, VESSEL_STATIC_FILE
 OUT_DIR = PROJECT_DIR / "data" / "derived" / "vessel_days"
 MAX_LENGTH_M, MAX_WIDTH_M = 450, 80
 MAX_STEP = "INTERVAL 1 HOUR"
+MAX_STEP_KNOTS = 60  # no ship here is faster; the fastest ferries make about 40 knots
 
 HAVERSINE = """
 CREATE MACRO haversine_m(lat1, lon1, lat2, lon2) AS
@@ -79,7 +85,10 @@ def build_day(con: duckdb.DuckDBPyConnection, day: str) -> dict:
             FROM p WINDOW w AS (PARTITION BY mmsi ORDER BY ts)
           ), dist AS (
             SELECT mmsi, round(sum(haversine_m(plat, plon, lat, lon))
-                         FILTER (WHERE pts IS NOT NULL AND ts - pts <= {MAX_STEP}) / 1000, 2)
+                         FILTER (WHERE pts IS NOT NULL AND ts - pts <= {MAX_STEP}
+                                 AND haversine_m(plat, plon, lat, lon)
+                                     / greatest(epoch(ts - pts), 1) * 1.943844
+                                     <= {MAX_STEP_KNOTS}) / 1000, 2)
                          AS distance_km
             FROM steps GROUP BY mmsi
           ), base AS (
@@ -92,7 +101,12 @@ def build_day(con: duckdb.DuckDBPyConnection, day: str) -> dict:
                    max(width) FILTER (WHERE width BETWEEN 1 AND {MAX_WIDTH_M}) AS width,
                    max(draught) FILTER (WHERE draught > 0) AS draught,
                    count(DISTINCT ts) AS reports, min(ts) AS first_ts, max(ts) AS last_ts,
-                   max(sog) AS max_sog, round(avg(sog), 2) AS avg_sog
+                   -- the top speed two distinct reports reached (one corrupt report made
+                   -- CENTURION the fastest tanker on 5 May 2026); the highest with one report
+                   coalesce(list_reverse_sort(list_transform(list_distinct(
+                       list(struct_pack(t := ts, s := sog)) FILTER (WHERE sog IS NOT NULL)),
+                       x -> x.s))[2], max(sog)) AS max_sog,
+                   round(avg(sog), 2) AS avg_sog
             FROM p GROUP BY mmsi
           ), inside AS (
             SELECT p.mmsi, pl.name AS place, bool_or(p.sog < 0.5) AS still,
@@ -142,7 +156,11 @@ def main() -> None:
     p.add_argument("--memory", default="24GB", help="DuckDB memory limit")
     p.add_argument("--spill", default="/tmp/duckdb_spill", help="DuckDB spill directory")
     p.add_argument("--static", action="store_true", help="only the per-ship table")
+    p.add_argument("--out", type=Path, help="build the days into this folder instead")
     args = p.parse_args()
+    global OUT_DIR
+    if args.out:
+        OUT_DIR = args.out.resolve()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect()
     con.execute(f"SET threads = {args.threads}; SET enable_progress_bar = false; "

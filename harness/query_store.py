@@ -384,11 +384,14 @@ def pattern_id(skeleton: str) -> str:
 # vessel_days lists, ship types, and every date a week earlier (or later near the start).
 _OTHER = {"port": ["Aalborg", "Skagen", "Frederikshavn"], "area": ["Kattegat", "Øresund",
                                                                    "Fehmarn Belt"],
-          "type": ["Cargo", "Tanker", "Passenger"]}
+          "type": ["Cargo", "Tanker", "Passenger", "Fishing", "Tug", "Pleasure", "Sailing", "HSC"]}
 _OTHER_VESSELS = ["TYCHO BRAHE", "HAMLET", "AURORA AF HELSINGBORG", "PERNILLE", "JEPPE"]
 
 
-def other_values(values: dict[str, object]) -> dict[str, object]:
+def other_values(values: dict[str, object]) -> dict[str, object] | None:
+    """The values with each slot changed, or None when a slot has no other value left: two
+    ship types (tankers or cargo ships) used up the three other types, and the StopIteration
+    stopped the whole nightly distill (26 Nov 2026)."""
     out, used = dict(values), set(values.values())
     shift = timedelta(days=-7)
     if any(isinstance(v, date) and v + shift < FIRST_DAY for v in values.values()):
@@ -397,15 +400,19 @@ def other_values(values: dict[str, object]) -> dict[str, object]:
         if name.startswith("date"):
             out[name] = min(value + shift, LAST_DAY)
         elif name.startswith("vessel"):
-            out[name] = next(v for v in _OTHER_VESSELS if v not in used
-                             and places.normalise(v) in _vessel_names())
+            out[name] = next((v for v in _OTHER_VESSELS if v not in used
+                              and places.normalise(v) in _vessel_names()), None)
+            if out[name] is None:
+                return None
             used.add(out[name])
         elif name.startswith(("place", "type")):
             place = _place(str(value)) if name.startswith("place") else None
             kind = "type" if name.startswith("type") else (place.kind if place else "port")
             more = [] if kind == "type" else sorted(p.name for p in places.load(False)
                                                     if p.kind == kind)
-            out[name] = next(v for v in [*_OTHER.get(kind, []), *more] if v not in used)
+            out[name] = next((v for v in [*_OTHER.get(kind, []), *more] if v not in used), None)
+            if out[name] is None:
+                return None
             used.add(out[name])
     return out
 
@@ -579,6 +586,10 @@ def render_args(skeleton: str, values: dict[str, object]) -> dict:
     return args
 
 
+_DRAWN_AREA_RE = re.compile(r"\bthe selected area\b|\bUse the exact rectangle selected by the user\b",
+                            re.IGNORECASE)
+
+
 def candidate(run: dict) -> tuple[dict | None, str]:
     """(pattern part from one logged run, "") or (None, why the run gives no pattern). Failed
     steps are left out: a planner run that got there after a failed attempt counts too."""
@@ -588,6 +599,9 @@ def candidate(run: dict) -> tuple[dict | None, str]:
     if len(steps) != 1:
         return None, "not one successful query"
     question = run.get("question_as_read") or run["question"]
+    if _DRAWN_AREA_RE.search(question) or _DRAWN_AREA_RE.search(run["question"]):
+        # Its box is in the SQL but not in the question: another rectangle would get this one.
+        return None, "asked with a rectangle drawn on the map"
     alias, values, words = question_skeleton(question)
     step = steps[0]
     if step["sql"] == "(port_calls)":
@@ -679,13 +693,16 @@ def distill(log_dir: Path = LOG_DIR, feedback_file: Path = FEEDBACK_FILE,
         elif check:
             values = {k: (date.fromisoformat(v) if k.startswith("date") else v)
                       for k, v in p["examples"][0]["values"].items()}
-            if p.get("kind") == "port_calls":  # other dates; the area keeps its ports
-                other = {**other_values(values),
-                         **{k: v for k, v in values.items() if k.startswith("place")}}
+            changed = other_values(values)
+            if changed is None:
+                pass  # no other value for a slot: the pattern is not tried with others
+            elif p.get("kind") == "port_calls":  # other dates; the area keeps its ports
+                other = {**changed, **{k: v for k, v in values.items() if k.startswith("place")}}
                 result = planner.run_port_calls(render_args(p["sql"], other))[1]
+                p["runs_with_other_values"] = "error" not in result
             else:
-                result = query_ais_data(render_sql(p["sql"], other_values(values)))
-            p["runs_with_other_values"] = "error" not in result
+                result = query_ais_data(render_sql(p["sql"], changed))
+                p["runs_with_other_values"] = "error" not in result
         p["status"], p["status_by"] = _status(p, reviews.get(p["id"]))
     store = {"built": time.strftime("%Y-%m-%dT%H:%M:%S"), "runs": len(runs),
              "refused": refused, "patterns": sorted(patterns.values(), key=lambda p: p["id"]),
@@ -848,6 +865,20 @@ def _vessel_match(store: dict, alias: str,
     return None
 
 
+def _same_place_kinds(pattern: dict, values: dict[str, object]) -> bool:
+    """Each place slot gets a place of the kind the pattern was learned with: "which ships were
+    docked in {place} at {time} on {date}" learned for a port answered "docked in Kattegat" (a
+    sea area) with every ship lying still in any harbour inside it (211)."""
+    learned = (pattern.get("examples") or [{}])[0].get("values") or {}
+    for name, value in values.items():
+        if not name.startswith("place") or name not in learned:
+            continue
+        old, new = _place(str(learned[name])), _place(str(value))
+        if old and new and old.kind != new.kind:
+            return False
+    return True
+
+
 def match(question: str, similar: bool = True) -> dict | None:
     """The best approved pattern for this question: one with its exact wording and slots, one
     whose wording it fits with a vessel name in a {vessel} slot, or (similar=True) the most
@@ -877,6 +908,7 @@ def match(question: str, similar: bool = True) -> dict | None:
             if sims[best] >= SIMILAR_MIN:
                 matched, p = pairs[allowed[best]]
                 hits, similarity, via = [p], round(float(sims[best]), 3), "similar"
+    hits = [p for p in hits if _same_place_kinds(p, values)]
     if not hits:
         return None
     p = max(hits, key=lambda p: (p["score"], len(p["runs"])))

@@ -6,6 +6,7 @@ highlight the ships, or open a vessel's route.
 
     hints = map_hints(question, trace)
     {"vessels": [{"mmsi": 219000123, "name": "TYCHO BRAHE"}, ...],   # from result rows
+     "vessel_names": ["AIDANOVA"],        # result names whose MMSI needs looking up
      "vessel_query": "TYCHO BRAHE",       # a vessel named in the question (map search)
      "places": [{"name": "Skagen", "box": [lon0, lat0, lon1, lat1]}],
      "start": "2026-03-01T00:00:00", "end": "2026-03-08T00:00:00",    # period, UTC
@@ -156,17 +157,31 @@ def map_hints(
     sqls = [c.get("sql") or "" for c in calls if "error" not in (c.get("result") or {})]
 
     vessels, seen = [], set()
+    vessel_names = set()
     for c in calls:
         result = c.get("result") or {}
-        columns = [str(x).lower() for x in result.get("columns") or []]
-        if "mmsi" not in columns:
+        if "error" in result:
             continue
+        columns = [str(x).lower() for x in result.get("columns") or []]
+        i = columns.index("mmsi") if "mmsi" in columns else None
+        j = next((columns.index(name) for name in ("name", "vessel_name", "ship_name")
+                  if name in columns), None)
+    # Only the last step that lists vessels, the one the answer gives: "which ships were docked
+    # in both Frederikshavn and Skagen" highlighted both ports' full lists (the planner's first
+    # two steps) around the 2 ships that were the answer.
+    listing = [c for c in calls if "error" not in (c.get("result") or {})
+               and "mmsi" in [str(x).lower() for x in (c.get("result") or {}).get("columns") or []]]
+    for c in listing[-1:]:
+        result = c.get("result") or {}
+        columns = [str(x).lower() for x in result.get("columns") or []]
         i, j = columns.index("mmsi"), columns.index("name") if "name" in columns else None
         for row in result.get("rows") or []:
-            mmsi = row[i]
+            mmsi = row[i] if i is not None else None
             if isinstance(mmsi, int) and mmsi not in seen and len(vessels) < MAX_VESSELS:
                 seen.add(mmsi)
                 vessels.append({"mmsi": mmsi, "name": row[j] if j is not None else None})
+            elif not isinstance(mmsi, int) and j is not None and isinstance(row[j], str) and row[j].strip():
+                vessel_names.add(row[j].strip())
 
     known = places.load()
     named = {p.name: p for p in places.mentioned(read, known)}
@@ -198,6 +213,7 @@ def map_hints(
 
     hints = {
         "vessels": vessels,
+        "vessel_names": sorted(vessel_names)[:MAX_VESSELS],
         "vessel_query": query,
         "places": ([{"name": "Selected area", "box": selected_area}] if selected_area else [])
         + [{"name": p.name, "box": list(p.box)} for p in named.values()],
@@ -210,8 +226,11 @@ def map_hints(
     }
     one_vessel = len(vessels) == 1 or (query is not None and not vessels)
     short = start is not None and end - start <= timedelta(days=MAX_ROUTE_DAYS)
-    wants_route = bool(re.search(r"\b(route|track|path|went|sailed|travel)", read, re.I))
-    if one_vessel and short and (wants_route or trace.get("route") == "reply"):
+    # Only a map request (the reply route's "visualisation") is drawn as a route: the page then
+    # replaces the answer with "Showing the route of ...". A data answer about how far a ship
+    # "sailed", or a decline ("how much fuel did MSC STACEY burn"), kept its text hidden.
+    map_request = trace.get("route") == "reply" and trace.get("route_reason") == "visualisation"
+    if one_vessel and short and map_request:
         hints["action"] = "route"
     elif hints["at"] or hints["places"] or vessels:
         hints["action"] = "snapshot"

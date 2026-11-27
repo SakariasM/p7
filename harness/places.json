@@ -287,7 +287,11 @@
   {
    "name": "Danish North Sea",
    "aliases": [
-    "North Sea (Danish waters)"
+    "North Sea (Danish waters)",
+    "North Sea",
+    "the North Sea",
+    "Nordsøen",
+    "Nordsoen"
    ],
    "kind": "area",
    "box": [
@@ -431,6 +435,27 @@
     55.3,
     11.09,
     55.355
+   ],
+   "source": "manual"
+  },
+  {
+   "name": "Øresund Bridge",
+   "aliases": [
+    "Oresund Bridge",
+    "Öresund Bridge",
+    "Øresundsbroen",
+    "Oresundsbroen",
+    "Öresundsbron",
+    "Oresundsbron",
+    "the Øresund Bridge",
+    "Øresund bridges"
+   ],
+   "kind": "area",
+   "box": [
+    12.755,
+    55.56,
+    12.915,
+    55.6
    ],
    "source": "manual"
   },
