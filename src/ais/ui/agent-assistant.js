@@ -394,7 +394,10 @@ async function askAgent() {
   setHighlightedVessels([]);
   pendingQuestion = new AbortController();
   const record = {
-    localId: crypto.randomUUID(), createdAt: Date.now(), question,
+    // crypto.randomUUID exists only on secure pages (HTTPS, localhost); the map is served over
+    // plain HTTP on the host, where calling it threw and no question was ever sent.
+    localId: crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+    createdAt: Date.now(), question,
     selectedArea: request.selected_area || null,
     response: null, feedback: {}, error: null,
   };
