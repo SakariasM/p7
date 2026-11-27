@@ -166,6 +166,15 @@ def map_hints(
         i = columns.index("mmsi") if "mmsi" in columns else None
         j = next((columns.index(name) for name in ("name", "vessel_name", "ship_name")
                   if name in columns), None)
+    # Only the last step that lists vessels, the one the answer gives: "which ships were docked
+    # in both Frederikshavn and Skagen" highlighted both ports' full lists (the planner's first
+    # two steps) around the 2 ships that were the answer.
+    listing = [c for c in calls if "error" not in (c.get("result") or {})
+               and "mmsi" in [str(x).lower() for x in (c.get("result") or {}).get("columns") or []]]
+    for c in listing[-1:]:
+        result = c.get("result") or {}
+        columns = [str(x).lower() for x in result.get("columns") or []]
+        i, j = columns.index("mmsi"), columns.index("name") if "name" in columns else None
         for row in result.get("rows") or []:
             mmsi = row[i] if i is not None else None
             if isinstance(mmsi, int) and mmsi not in seen and len(vessels) < MAX_VESSELS:
@@ -217,8 +226,11 @@ def map_hints(
     }
     one_vessel = len(vessels) == 1 or (query is not None and not vessels)
     short = start is not None and end - start <= timedelta(days=MAX_ROUTE_DAYS)
-    wants_route = bool(re.search(r"\b(route|track|path|went|sailed|travel)", read, re.I))
-    if one_vessel and short and (wants_route or trace.get("route") == "reply"):
+    # Only a map request (the reply route's "visualisation") is drawn as a route: the page then
+    # replaces the answer with "Showing the route of ...". A data answer about how far a ship
+    # "sailed", or a decline ("how much fuel did MSC STACEY burn"), kept its text hidden.
+    map_request = trace.get("route") == "reply" and trace.get("route_reason") == "visualisation"
+    if one_vessel and short and map_request:
         hints["action"] = "route"
     elif hints["at"] or hints["places"] or vessels:
         hints["action"] = "snapshot"

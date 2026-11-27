@@ -21,7 +21,7 @@
   {"name": "Smålandsfarvandet", "aliases": ["Smalandsfarvandet"], "kind": "area", "box": [11.2, 54.9, 12.0, 55.3]},
   {"name": "Isefjord", "aliases": [], "kind": "area", "box": [11.65, 55.7, 11.95, 55.98]},
   {"name": "Arkona Basin", "aliases": ["western Baltic Sea"], "kind": "area", "box": [12.5, 54.5, 14.5, 55.3]},
-  {"name": "Danish North Sea", "aliases": ["North Sea (Danish waters)"], "kind": "area", "box": [4.0, 55.0, 8.5, 57.5]},
+  {"name": "Danish North Sea", "aliases": ["North Sea (Danish waters)", "North Sea", "the North Sea", "Nordsøen", "Nordsoen"], "kind": "area", "box": [4.0, 55.0, 8.5, 57.5]},
   {"name": "Nexø", "aliases": ["Nexo", "Neksø", "Nekso"], "kind": "port", "box": [15.118, 55.053, 15.14, 55.068], "country": "DK"},
   {"name": "Svaneke", "aliases": ["DKSVA"], "kind": "port", "box": [15.139, 55.131, 15.15, 55.142], "country": "DK"},
   {"name": "Gudhjem", "aliases": ["DKGDM"], "kind": "port", "box": [14.964, 55.209, 14.976, 55.219], "country": "DK"},
@@ -31,6 +31,7 @@
   {"name": "Christiansø", "aliases": ["Christianso", "Ertholmene"], "kind": "port", "box": [15.181, 55.315, 15.191, 55.325], "country": "DK"},
   {"name": "Skive", "aliases": [], "kind": "port", "box": [9.048, 56.567, 9.058, 56.579], "country": "DK"},
   {"name": "Great Belt Bridge", "aliases": ["Storebæltsbroen", "Storebaeltsbroen", "Storebælt Bridge", "Great Belt bridges"], "kind": "area", "box": [10.855, 55.3, 11.09, 55.355]},
+  {"name": "Øresund Bridge", "aliases": ["Oresund Bridge", "Öresund Bridge", "Øresundsbroen", "Oresundsbroen", "Öresundsbron", "Oresundsbron", "the Øresund Bridge", "Øresund bridges"], "kind": "area", "box": [12.755, 55.56, 12.915, 55.6]},
   {"name": "Little Belt bridges", "aliases": ["Lillebæltsbroen", "Lillebaeltsbroen", "Little Belt Bridge", "Lillebælt bridges"], "kind": "area", "box": [9.66, 55.495, 9.74, 55.525]}
  ]
 }
